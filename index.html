@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Capsule Ferrofluid Study</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./main.js"></script>
+  </head>
+  <body>
+    <canvas id="scene" aria-label="ferrofluid simulation"></canvas>
+
+    <section class="hud hud-left" aria-label="simulation and audio controls">
+      <h1>Capsule Ferrofluid</h1>
+      <p>Driver-based ferrofluid motion and real-time audio control.</p>
+
+      <div class="hud-section">
+        <h2 class="hud-group-title">Fluid Dynamics</h2>
+
+        <label for="magnetStrength">Magnet strength</label>
+        <div class="control-row">
+          <input id="magnetStrength" type="range" min="300" max="7000" step="10" value="2600" />
+          <output id="magnetStrength-value">2600</output>
+        </div>
+
+        <label for="gravity">Gravity</label>
+        <div class="control-row">
+          <input id="gravity" type="range" min="0" max="70" step="1" value="18" />
+          <output id="gravity-value">18</output>
+        </div>
+
+        <label for="jitter">Organic jitter</label>
+        <div class="control-row">
+          <input id="jitter" type="range" min="0" max="45" step="1" value="12" />
+          <output id="jitter-value">12</output>
+        </div>
+
+        <label for="density">Density</label>
+        <div class="control-row">
+          <input id="density" type="range" min="0.5" max="2.2" step="0.01" value="1.0" />
+          <output id="density-value">1.00</output>
+        </div>
+
+        <label for="viscosity">Viscosity</label>
+        <div class="control-row">
+          <input id="viscosity" type="range" min="0" max="2.2" step="0.01" value="0.00" />
+          <output id="viscosity-value">0.00</output>
+        </div>
+
+        <label for="resistance">Resistance</label>
+        <div class="control-row">
+          <input id="resistance" type="range" min="0" max="1.2" step="0.01" value="0.05" />
+          <output id="resistance-value">0.05</output>
+        </div>
+      </div>
+
+      <div class="hud-section">
+        <h2 class="hud-group-title">Drive</h2>
+
+        <label for="pulseHz">Pulse rate (Hz)</label>
+        <div class="control-row">
+          <input id="pulseHz" type="range" min="0.5" max="18" step="0.1" value="8.4" />
+          <output id="pulseHz-value">8.4</output>
+        </div>
+
+        <label for="pulseAggression">Pulse aggression</label>
+        <div class="control-row">
+          <input id="pulseAggression" type="range" min="0" max="14" step="0.1" value="7.2" />
+          <output id="pulseAggression-value">7.2</output>
+        </div>
+
+        <label class="checkbox-row" for="manualPulse">
+          <input id="manualPulse" type="checkbox" />
+          <span>Manual pulse mode (mouse)</span>
+        </label>
+
+        <label class="checkbox-row" for="audioReactive">
+          <input id="audioReactive" type="checkbox" />
+          <span>Audio reactive drive</span>
+        </label>
+
+        <label for="driveMode">Driver behavior</label>
+        <div class="control-row">
+          <select id="driveMode">
+            <option value="gate" selected>Magnet on/off</option>
+            <option value="inout">Magnet in/out</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="hud-section">
+        <h2 class="hud-group-title">Audio Input</h2>
+
+        <label for="audioFile">Music file</label>
+        <div class="control-row">
+          <input id="audioFile" type="file" accept="audio/*" />
+        </div>
+
+        <div class="button-row">
+          <button id="audioToggle" type="button">Play file</button>
+          <button id="micToggle" type="button">Use mic</button>
+          <button id="systemToggle" type="button">Use system</button>
+        </div>
+
+        <label for="audioSensitivity">Audio sensitivity</label>
+        <div class="control-row">
+          <input id="audioSensitivity" type="range" min="0.4" max="8.0" step="0.01" value="2.60" />
+          <output id="audioSensitivity-value">2.60</output>
+        </div>
+
+        <label for="audioSmoothing">Audio smoothing</label>
+        <div class="control-row">
+          <input id="audioSmoothing" type="range" min="0" max="0.98" step="0.01" value="0.72" />
+          <output id="audioSmoothing-value">0.72</output>
+        </div>
+
+        <label for="audioThreshold">Audio threshold</label>
+        <div class="control-row">
+          <input id="audioThreshold" type="range" min="0" max="0.7" step="0.01" value="0.16" />
+          <output id="audioThreshold-value">0.16</output>
+        </div>
+
+        <p class="audio-status" id="audioStatus">Audio source: none</p>
+      </div>
+    </section>
+
+    <section class="hud hud-right" aria-label="render and lighting controls">
+      <div class="hud-section">
+        <h2 class="hud-group-title">Render</h2>
+
+        <label for="renderQuality">Render quality</label>
+        <div class="control-row">
+          <input id="renderQuality" type="range" min="0.6" max="2.4" step="0.05" value="1.25" />
+          <output id="renderQuality-value">1.25</output>
+        </div>
+
+        <label for="cameraOffsetX">Camera offset X</label>
+        <div class="control-row">
+          <input id="cameraOffsetX" type="range" min="-0.35" max="0.35" step="0.01" value="0.08" />
+          <output id="cameraOffsetX-value">0.08</output>
+        </div>
+
+        <label for="cameraYaw">Camera yaw (deg)</label>
+        <div class="control-row">
+          <input id="cameraYaw" type="range" min="-24" max="24" step="0.1" value="10.0" />
+          <output id="cameraYaw-value">10.0</output>
+        </div>
+
+        <label for="cameraOffsetY">Camera offset Y</label>
+        <div class="control-row">
+          <input id="cameraOffsetY" type="range" min="-0.35" max="0.35" step="0.01" value="-0.04" />
+          <output id="cameraOffsetY-value">-0.04</output>
+        </div>
+
+        <label for="spikeAmount">Spike detail</label>
+        <div class="control-row">
+          <input id="spikeAmount" type="range" min="0" max="1.8" step="0.01" value="0.62" />
+          <output id="spikeAmount-value">0.62</output>
+        </div>
+
+        <label for="fluidColor">Fluid color</label>
+        <div class="control-row">
+          <input id="fluidColor" type="color" value="#4a1688" />
+          <output id="fluidColor-value">#4a1688</output>
+        </div>
+
+        <label for="fluidTint">Fluid tint</label>
+        <div class="control-row">
+          <input id="fluidTint" type="range" min="0" max="1" step="0.01" value="0.82" />
+          <output id="fluidTint-value">0.82</output>
+        </div>
+
+        <label class="checkbox-row" for="showSpeaker">
+          <input id="showSpeaker" type="checkbox" checked />
+          <span>Show speaker</span>
+        </label>
+      </div>
+
+      <div class="hud-section">
+        <h2 class="hud-group-title">Point Light</h2>
+
+        <label for="pointLightColor">Point light color</label>
+        <div class="control-row">
+          <input id="pointLightColor" type="color" value="#ffffff" />
+          <output id="pointLightColor-value">#ffffff</output>
+        </div>
+
+        <label for="pointLightIntensity">Point light intensity</label>
+        <div class="control-row">
+          <input id="pointLightIntensity" type="range" min="0" max="2.2" step="0.01" value="1.00" />
+          <output id="pointLightIntensity-value">1.00</output>
+        </div>
+
+        <label for="exposure">Exposure</label>
+        <div class="control-row">
+          <input id="exposure" type="range" min="0.6" max="1.8" step="0.01" value="1.04" />
+          <output id="exposure-value">1.04</output>
+        </div>
+
+        <label for="ambientStrength">Ambient strength</label>
+        <div class="control-row">
+          <input id="ambientStrength" type="range" min="0" max="1" step="0.01" value="0.24" />
+          <output id="ambientStrength-value">0.24</output>
+        </div>
+
+        <label for="occlusionStrength">Ambient occlusion</label>
+        <div class="control-row">
+          <input id="occlusionStrength" type="range" min="0" max="1" step="0.01" value="0.58" />
+          <output id="occlusionStrength-value">0.58</output>
+        </div>
+
+        <label for="pointLightOffsetX">Point light X</label>
+        <div class="control-row">
+          <input id="pointLightOffsetX" type="range" min="-1" max="1" step="0.01" value="-0.25" />
+          <output id="pointLightOffsetX-value">-0.25</output>
+        </div>
+
+        <label for="pointLightOffsetY">Point light Y</label>
+        <div class="control-row">
+          <input id="pointLightOffsetY" type="range" min="-1" max="1" step="0.01" value="-0.47" />
+          <output id="pointLightOffsetY-value">-0.47</output>
+        </div>
+      </div>
+    </section>
+  </body>
+</html>
