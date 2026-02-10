@@ -94,6 +94,7 @@ class CapsuleFerrofluid {
       audioThreshold: 0.51,
       manualPulse: true,
       showSpeaker: false,
+      viewMagnet: false,
       cohesion: 76,
       repulsion: 168,
       centerPull: 0.38,
@@ -857,6 +858,7 @@ class CapsuleFerrofluid {
 
     const checkboxControls = [
       { id: "showSpeaker", key: "showSpeaker" },
+      { id: "viewMagnet", key: "viewMagnet" },
       { id: "manualPulse", key: "manualPulse" },
       { id: "audioReactive", key: "audioReactive" },
       { id: "enableOrbitDrag", key: "enableOrbitDrag" },
@@ -2394,7 +2396,7 @@ class CapsuleFerrofluid {
     this.drawCapsuleShadow();
     this.renderField();
     this.drawFluid();
-    if (this.params.showSpeaker) {
+    if (this.params.viewMagnet) {
       this.drawMagnet();
     }
     this.drawCapsuleGlass();
@@ -2860,7 +2862,10 @@ class CapsuleFerrofluid {
 
   drawMagnet() {
     const magnetSize = clamp(this.params.magnetSize, 0.35, 5.0);
-    const radius = this.scale * 0.042 * Math.pow(magnetSize, 0.62);
+    const ringRadius = this.scale * (0.055 + magnetSize * 0.088);
+    const ringBand = this.scale * (0.05 + magnetSize * 0.06);
+    const outerRadius = ringRadius + ringBand * 0.5;
+    const innerRadius = Math.max(this.scale * 0.01, ringRadius - ringBand * 0.5);
     const pulseMix = 0.2 + this.pulseState * 0.8;
     const magnetX = this.magnetX + this.viewOffsetX;
     const magnetY = this.magnetY + this.viewOffsetY;
@@ -2868,23 +2873,35 @@ class CapsuleFerrofluid {
     this.ctx.save();
     this.ctx.translate(magnetX, magnetY);
 
-    const glow = this.ctx.createRadialGradient(0, 0, 0, 0, 0, radius * 3.5);
-    glow.addColorStop(0, `rgba(121, 182, 255, ${0.16 + pulseMix * 0.28})`);
+    const glow = this.ctx.createRadialGradient(0, 0, innerRadius * 0.2, 0, 0, outerRadius * 2.2);
+    glow.addColorStop(0, `rgba(121, 182, 255, ${0.08 + pulseMix * 0.1})`);
+    glow.addColorStop(0.6, `rgba(121, 182, 255, ${0.11 + pulseMix * 0.2})`);
     glow.addColorStop(1, "rgba(121, 182, 255, 0)");
 
     this.ctx.fillStyle = glow;
     this.ctx.beginPath();
-    this.ctx.arc(0, 0, radius * 3.5, 0, TAU);
+    this.ctx.arc(0, 0, outerRadius * 2.2, 0, TAU);
     this.ctx.fill();
 
-    this.ctx.lineWidth = Math.max(1.1, this.scale * 0.005);
-    this.ctx.strokeStyle = `rgba(210, 232, 255, ${0.32 + pulseMix * 0.5})`;
-    this.ctx.fillStyle = `rgba(168, 211, 255, ${0.16 + pulseMix * 0.32})`;
+    this.ctx.lineWidth = Math.max(0.9, this.scale * 0.0042);
+    this.ctx.strokeStyle = `rgba(210, 232, 255, ${0.34 + pulseMix * 0.46})`;
+    this.ctx.fillStyle = `rgba(168, 211, 255, ${0.08 + pulseMix * 0.14})`;
 
     this.ctx.beginPath();
-    this.ctx.arc(0, 0, radius, 0, TAU);
+    this.ctx.arc(0, 0, outerRadius, 0, TAU);
+    this.ctx.arc(0, 0, innerRadius, 0, TAU, true);
     this.ctx.fill();
     this.ctx.stroke();
+
+    this.ctx.beginPath();
+    this.ctx.strokeStyle = `rgba(121, 182, 255, ${0.18 + pulseMix * 0.3})`;
+    this.ctx.arc(0, 0, ringRadius, 0, TAU);
+    this.ctx.stroke();
+
+    this.ctx.beginPath();
+    this.ctx.fillStyle = `rgba(168, 211, 255, ${0.2 + pulseMix * 0.24})`;
+    this.ctx.arc(0, 0, Math.max(this.scale * 0.006, innerRadius * 0.18), 0, TAU);
+    this.ctx.fill();
 
     this.ctx.restore();
   }
