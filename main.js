@@ -84,6 +84,7 @@ class CapsuleFerrofluid {
       fluidColorHex: "#0062ff",
       fluidTint: 0.22,
       reflectivity: 1.36,
+      reflectionClarity: 1.35,
       impactHighlights: 1.3,
       flakeAmount: 0.18,
       iridescenceStrength: 0.0,
@@ -769,6 +770,7 @@ class CapsuleFerrofluid {
       "exposure",
       "fluidTint",
       "reflectivity",
+      "reflectionClarity",
       "impactHighlights",
       "flakeAmount",
       "iridescenceStrength",
@@ -806,6 +808,7 @@ class CapsuleFerrofluid {
           id === "exposure" ||
           id === "fluidTint" ||
           id === "reflectivity" ||
+          id === "reflectionClarity" ||
           id === "impactHighlights" ||
           id === "flakeAmount" ||
           id === "iridescenceStrength" ||
@@ -1842,6 +1845,7 @@ class CapsuleFerrofluid {
     const sideLightStrength = clamp(this.params.sideLightStrength, 0, 2.5);
     const envLightStrength = clamp(this.params.envLightStrength, 0, 2.5);
     const reflectivity = clamp(this.params.reflectivity, 0, 2.2);
+    const reflectionClarity = clamp(this.params.reflectionClarity, 0.5, 2.5);
     const impactHighlights = clamp(this.params.impactHighlights, 0, 2.5);
     const flakeAmount = clamp(this.params.flakeAmount, 0, 1);
     const iridescenceStrength = clamp(this.params.iridescenceStrength, 0, 2.4);
@@ -1881,7 +1885,13 @@ class CapsuleFerrofluid {
       ? clamp((hasHdri ? 0.22 : 0.4) * (1 - whiteMixReduction), 0.04, 0.56)
       : 0;
     const roomWhiteMixMirror = useEnvReflections
-      ? clamp((hasHdri ? 0.3 : 0.52) * (1 - whiteMixReduction * 0.92), 0.06, 0.68)
+      ? clamp(
+          (hasHdri ? 0.3 : 0.52) *
+            (1 - whiteMixReduction * 0.92) *
+            (1 - smoothstep(0.92, 2.3, reflectionClarity) * 0.62),
+          0.02,
+          0.68,
+        )
       : 0;
 
     for (let y = 0; y < height; y += 1) {
@@ -2113,9 +2123,22 @@ class CapsuleFerrofluid {
         }
         const hdriMirrorSample = useEnvReflections ? this.sampleHdriDirection(rx, ry, rz) : null;
         if (hdriMirrorSample) {
-          envMirrorColorR = hdriMirrorSample[0];
-          envMirrorColorG = hdriMirrorSample[1];
-          envMirrorColorB = hdriMirrorSample[2];
+          const clarityNorm = clamp((reflectionClarity - 0.5) / (2.5 - 0.5), 0, 1);
+          const mirrorContrast = 1 + clarityNorm * 1.65;
+          const mirrorSaturation = 1 + clarityNorm * 0.28;
+          const mr = hdriMirrorSample[0] / 255;
+          const mg = hdriMirrorSample[1] / 255;
+          const mb = hdriMirrorSample[2] / 255;
+          const ml = mr * 0.2126 + mg * 0.7152 + mb * 0.0722;
+          const satR = clamp(ml + (mr - ml) * mirrorSaturation, 0, 1);
+          const satG = clamp(ml + (mg - ml) * mirrorSaturation, 0, 1);
+          const satB = clamp(ml + (mb - ml) * mirrorSaturation, 0, 1);
+          const contrastR = clamp((satR - 0.5) * mirrorContrast + 0.5, 0, 1);
+          const contrastG = clamp((satG - 0.5) * mirrorContrast + 0.5, 0, 1);
+          const contrastB = clamp((satB - 0.5) * mirrorContrast + 0.5, 0, 1);
+          envMirrorColorR = contrastR * 255;
+          envMirrorColorG = contrastG * 255;
+          envMirrorColorB = contrastB * 255;
         }
         const ledEnvStrength = useEnvReflections
           ? clamp(
@@ -2293,7 +2316,8 @@ class CapsuleFerrofluid {
           hdriBoost *
           0.6 *
           envReflectionGain *
-          envDiffuseCoreDamp;
+          envDiffuseCoreDamp *
+          (1 - smoothstep(0.86, 2.2, reflectionClarity) * 0.38);
         const envDiffuseR = envDiffuse * (0.18 + (envDiffuseColorR / 255) * 0.82);
         const envDiffuseG = envDiffuse * (0.18 + (envDiffuseColorG / 255) * 0.82);
         const envDiffuseB = envDiffuse * (0.18 + (envDiffuseColorB / 255) * 0.82);
@@ -2306,7 +2330,8 @@ class CapsuleFerrofluid {
           detachedSpecDamp *
           reflectivity *
           envReflectionGain *
-          highlightDamp;
+          highlightDamp *
+          (0.9 + smoothstep(0.92, 2.3, reflectionClarity) * 1.1);
         const envMirrorTintStrength = tintMix * (0.24 + tintColorfulness * 0.56);
         const envMirrorR = envMirrorAdd * (0.2 + (envMirrorColorR / 255) * 0.8) * (1 + (tintHueR - 1) * envMirrorTintStrength);
         const envMirrorG = envMirrorAdd * (0.2 + (envMirrorColorG / 255) * 0.8) * (1 + (tintHueG - 1) * envMirrorTintStrength);
