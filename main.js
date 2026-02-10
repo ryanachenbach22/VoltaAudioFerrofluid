@@ -1555,32 +1555,36 @@ class CapsuleFerrofluid {
       const driveDelta = pulseDrive - this.prevPulseDrive;
       if (driveDelta > 0.0001) {
         const travelKick = this.scale * this.params.pulseAggression * driveDelta * 0.26;
+        const ringRadiusKick = this.scale * (0.055 + magnetSize * 0.088);
         for (let i = 0; i < count; i += 1) {
           const mx = this.magnetX - this.px[i];
           const my = this.magnetY - this.py[i];
           const dist = Math.hypot(mx, my) + 0.0001;
+          const ringSign = dist > ringRadiusKick ? 1 : -1;
           const nx = mx / dist;
           const ny = my / dist;
           const tx = -ny;
           const ty = nx;
           const swirl = Math.sin(this.time * 24 + i * 0.17);
-          this.vx[i] += nx * travelKick + tx * travelKick * 0.18 * swirl;
-          this.vy[i] += ny * travelKick + ty * travelKick * 0.18 * swirl;
+          this.vx[i] += nx * travelKick * ringSign + tx * travelKick * 0.18 * swirl;
+          this.vy[i] += ny * travelKick * ringSign + ty * travelKick * 0.18 * swirl;
         }
       }
     } else if (pulseOn === 1 && this.prevPulseOn === 0 && this.params.pulseAggression > 0.01) {
       const pulseKick = this.scale * this.params.pulseAggression * 0.072;
+      const ringRadiusKick = this.scale * (0.055 + magnetSize * 0.088);
       for (let i = 0; i < count; i += 1) {
         const mx = this.magnetX - this.px[i];
         const my = this.magnetY - this.py[i];
         const dist = Math.hypot(mx, my) + 0.0001;
+        const ringSign = dist > ringRadiusKick ? 1 : -1;
         const nx = mx / dist;
         const ny = my / dist;
         const tx = -ny;
         const ty = nx;
         const swirl = Math.sin(this.time * 27 + i * 0.23);
-        this.vx[i] += nx * pulseKick + tx * pulseKick * 0.22 * swirl;
-        this.vy[i] += ny * pulseKick + ty * pulseKick * 0.22 * swirl;
+        this.vx[i] += nx * pulseKick * ringSign + tx * pulseKick * 0.22 * swirl;
+        this.vy[i] += ny * pulseKick * ringSign + ty * pulseKick * 0.22 * swirl;
       }
     }
 
@@ -1593,17 +1597,19 @@ class CapsuleFerrofluid {
       const transientKick =
         this.scale *
         (0.065 + this.params.pulseAggression * 0.048 + audioSignal.transient * 0.24);
+      const ringRadiusKick = this.scale * (0.055 + magnetSize * 0.088);
       for (let i = 0; i < count; i += 1) {
         const mx = this.magnetX - this.px[i];
         const my = this.magnetY - this.py[i];
         const dist = Math.hypot(mx, my) + 0.0001;
+        const ringSign = dist > ringRadiusKick ? 1 : -1;
         const nx = mx / dist;
         const ny = my / dist;
         const tx = -ny;
         const ty = nx;
         const swirl = (Math.random() - 0.5) * audioSignal.transient * 0.7;
-        this.vx[i] += nx * transientKick + tx * transientKick * swirl;
-        this.vy[i] += ny * transientKick + ty * transientKick * swirl;
+        this.vx[i] += nx * transientKick * ringSign + tx * transientKick * swirl;
+        this.vy[i] += ny * transientKick * ringSign + ty * transientKick * swirl;
       }
     }
     this.prevPulseOn = pulseOn;
@@ -1625,6 +1631,7 @@ class CapsuleFerrofluid {
       const ringRadius = this.scale * (0.055 + magnetSize * 0.088);
       const ringBand = this.scale * (0.05 + magnetSize * 0.06);
       const ringOffset = magnetDist - ringRadius;
+      const ringCenterDamp = smoothstep(0.34, 0.9, magnetDist / Math.max(1, ringRadius));
       const ringT = ringOffset / Math.max(1, ringBand);
       const ringFalloff = 1 / (1 + ringT * ringT);
       const ringSpring = clamp(Math.abs(ringOffset) / Math.max(1, ringBand * 1.35), 0, 2.8);
@@ -1648,13 +1655,15 @@ class CapsuleFerrofluid {
         this.params.centerPull *
         densityScale *
         centerPullGain *
-        centerPullSizeDamp;
+        centerPullSizeDamp *
+        ringCenterDamp;
       ay +=
         (comY - this.py[i]) *
         this.params.centerPull *
         densityScale *
         centerPullGain *
-        centerPullSizeDamp;
+        centerPullSizeDamp *
+        ringCenterDamp;
 
       if (surfaceTensionStrength > 0.0001 && this.tensionW[i] > 0.0001) {
         const avgX = this.tensionX[i] / this.tensionW[i];
@@ -1678,7 +1687,8 @@ class CapsuleFerrofluid {
           surfaceTensionStrength *
           (0.001 + pulseDriveShaped * 0.018) *
           compactEdge *
-          (0.02 + pulseDriveShaped * 0.98);
+          (0.02 + pulseDriveShaped * 0.98) *
+          ringCenterDamp;
         ax += (comX - this.px[i]) * compactionGain;
         ay += (comY - this.py[i]) * compactionGain;
       }
