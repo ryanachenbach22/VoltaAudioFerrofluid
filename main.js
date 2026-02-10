@@ -55,8 +55,9 @@ class CapsuleFerrofluid {
     this.ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
 
     this.params = {
-      particleCount: 120,
-      magnetStrength: 1080,
+      particleCount: 90,
+      magnetStrength: 500,
+      magnetSize: 1.0,
       gravity: 52,
       jitter: 45,
       renderQuality: 1.0,
@@ -66,7 +67,7 @@ class CapsuleFerrofluid {
       enableOrbitDrag: true,
       pulseHz: 8.4,
       pulseAggression: 7.2,
-      density: 1.0,
+      density: 0.78,
       viscosity: 0.05,
       resistance: 0.94,
       surfaceTension: 2.5,
@@ -746,6 +747,7 @@ class CapsuleFerrofluid {
   bindControls() {
     const ids = [
       "magnetStrength",
+      "magnetSize",
       "gravity",
       "jitter",
       "renderQuality",
@@ -791,6 +793,7 @@ class CapsuleFerrofluid {
         } else if (
           id === "cameraOffsetX" ||
           id === "cameraOffsetY" ||
+          id === "magnetSize" ||
           id === "density" ||
           id === "resistance" ||
           id === "surfaceTension" ||
@@ -1102,7 +1105,7 @@ class CapsuleFerrofluid {
     this.neighborRadiusSq = this.neighborRadius * this.neighborRadius;
     this.isolationLinkRadius = this.neighborRadius * 0.72;
     this.repulsionRadius = this.scale * 0.05;
-    this.magnetRange = this.scale * 0.5;
+    this.magnetRangeBase = this.scale * 0.5;
     this.magnetClamp = 1800;
     this.maxSpeed = this.scale * 6.2;
 
@@ -1542,7 +1545,7 @@ class CapsuleFerrofluid {
 
     if (isInOutDrive && this.params.pulseAggression > 0.01) {
       const driveDelta = pulseDrive - this.prevPulseDrive;
-      if (Math.abs(driveDelta) > 0.0001) {
+      if (driveDelta > 0.0001) {
         const travelKick = this.scale * this.params.pulseAggression * driveDelta * 0.26;
         for (let i = 0; i < count; i += 1) {
           const mx = this.magnetX - this.px[i];
@@ -1570,20 +1573,6 @@ class CapsuleFerrofluid {
         const swirl = Math.sin(this.time * 27 + i * 0.23);
         this.vx[i] += nx * pulseKick + tx * pulseKick * 0.22 * swirl;
         this.vy[i] += ny * pulseKick + ty * pulseKick * 0.22 * swirl;
-      }
-    } else if (pulseOn === 0 && this.prevPulseOn === 1 && this.params.pulseAggression > 0.01) {
-      const recoilKick = this.scale * this.params.pulseAggression * 0.046;
-      for (let i = 0; i < count; i += 1) {
-        const mx = this.magnetX - this.px[i];
-        const my = this.magnetY - this.py[i];
-        const dist = Math.hypot(mx, my) + 0.0001;
-        const nx = mx / dist;
-        const ny = my / dist;
-        const tx = -ny;
-        const ty = nx;
-        const swirl = Math.sin(this.time * 21 + i * 0.19);
-        this.vx[i] -= nx * recoilKick - tx * recoilKick * 0.16 * swirl;
-        this.vy[i] -= ny * recoilKick - ty * recoilKick * 0.16 * swirl;
       }
     }
 
@@ -1622,8 +1611,10 @@ class CapsuleFerrofluid {
       const magnetDistSq = mx * mx + my * my + 0.0001;
       const magnetDist = Math.sqrt(magnetDistSq);
 
+      const magnetSize = clamp(this.params.magnetSize, 0.35, 5.0);
       const rangeScale = isInOutDrive ? 0.74 + pulseDrive * 0.86 : 1;
-      const magnetT = magnetDist / (this.magnetRange * rangeScale);
+      const effectiveMagnetRange = this.magnetRangeBase * magnetSize * rangeScale;
+      const magnetT = magnetDist / Math.max(1, effectiveMagnetRange);
       let magnetForce = this.params.magnetStrength / (1 + magnetT * magnetT);
       magnetForce *= magnetGate * magnetBoost * audioBoost;
       const dynamicMagnetClamp =
@@ -2846,7 +2837,8 @@ class CapsuleFerrofluid {
   }
 
   drawMagnet() {
-    const radius = this.scale * 0.042;
+    const magnetSize = clamp(this.params.magnetSize, 0.35, 5.0);
+    const radius = this.scale * 0.042 * Math.pow(magnetSize, 0.62);
     const pulseMix = 0.2 + this.pulseState * 0.8;
     const magnetX = this.magnetX + this.viewOffsetX;
     const magnetY = this.magnetY + this.viewOffsetY;
