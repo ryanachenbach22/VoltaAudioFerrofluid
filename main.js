@@ -1,6 +1,5 @@
 const TAU = Math.PI * 2;
-const STUDIO_WIZJA_01_URL =
-  "https://dl.polyhaven.org/file/ph-assets/HDRIs/jpg/4k/studio_wizja_01_4k.jpg";
+const SUNNY_ROSE_GARDEN_URL = "./assets/sunny_rose_garden_4k.jpg";
 const LOCAL_ENV_FALLBACK_URL = "./reference-ferrofluid/dist/assets/env-map-01.jpg";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -45,6 +44,11 @@ const toneMapACES = (value, exposure = 1) => {
   return clamp(mapped * 255, 0, 255);
 };
 
+const hash2 = (x, y) => {
+  const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+  return s - Math.floor(s);
+};
+
 class CapsuleFerrofluid {
   constructor(canvas) {
     this.canvas = canvas;
@@ -52,38 +56,46 @@ class CapsuleFerrofluid {
 
     this.params = {
       particleCount: 120,
-      magnetStrength: 2600,
-      gravity: 18,
-      jitter: 12,
-      renderQuality: 1.25,
+      magnetStrength: 1080,
+      gravity: 52,
+      jitter: 45,
+      renderQuality: 1.0,
       cameraOffsetX: 0.08,
       cameraYaw: 10.0,
       cameraOffsetY: -0.04,
-      spikeAmount: 0.62,
+      enableOrbitDrag: true,
       pulseHz: 8.4,
       pulseAggression: 7.2,
       density: 1.0,
-      viscosity: 0.0,
-      resistance: 0.05,
-      pointLightColorHex: "#ffffff",
+      viscosity: 0.05,
+      resistance: 0.94,
+      surfaceTension: 2.5,
+      pointLightColorHex: "#ff0000",
+      useHdriReflections: true,
       pointLightIntensity: 1.0,
+      sideLightStrength: 1.0,
+      envLightStrength: 1.2,
       pointLightOffsetX: -0.25,
       pointLightOffsetY: -0.47,
-      exposure: 1.04,
-      ambientStrength: 0.24,
+      exposure: 1.06,
+      ambientStrength: 0.36,
       occlusionStrength: 0.58,
-      fluidColorHex: "#4a1688",
-      fluidTint: 0.82,
+      fluidColorHex: "#0062ff",
+      fluidTint: 0.22,
+      reflectivity: 1.36,
+      impactHighlights: 1.3,
+      flakeAmount: 0.18,
+      iridescenceStrength: 0.0,
       audioReactive: false,
-      driveMode: "gate",
-      audioSensitivity: 2.6,
+      driveMode: "inout",
+      audioSensitivity: 1.37,
       audioSmoothing: 0.72,
-      audioThreshold: 0.16,
-      manualPulse: false,
-      showSpeaker: true,
+      audioThreshold: 0.51,
+      manualPulse: true,
+      showSpeaker: false,
       cohesion: 76,
       repulsion: 168,
-      centerPull: 1.0,
+      centerPull: 0.38,
       clusterBalance: 0.5,
     };
 
@@ -99,6 +111,16 @@ class CapsuleFerrofluid {
     this.cameraZoom = 1;
     this.minZoom = 0.03;
     this.maxZoom = Number.POSITIVE_INFINITY;
+    this.orbitYaw = 0;
+    this.orbitPitch = 0;
+    this.orbitActive = false;
+    this.orbitPointerId = -1;
+    this.orbitLastX = 0;
+    this.orbitLastY = 0;
+    this.magnetOrganicX = 0;
+    this.magnetOrganicY = 0;
+    this.magnetOrganicPhase = Math.random() * TAU;
+    this.motionHighlight = 0;
 
     this.pointLightColor = hexToRgb01(this.params.pointLightColorHex);
     this.fluidColor = hexToRgb01(this.params.fluidColorHex);
@@ -112,10 +134,19 @@ class CapsuleFerrofluid {
 
     this.fieldCanvas = document.createElement("canvas");
     this.fieldCtx = this.fieldCanvas.getContext("2d");
+    this.fluidShadowCanvas = document.createElement("canvas");
+    this.fluidShadowCtx = this.fluidShadowCanvas.getContext("2d");
+    this.shadowScale = 0.56;
+    this.fieldGridCellSize = 1;
+    this.fieldGridCols = 1;
+    this.fieldGridRows = 1;
+    this.fieldGridHeads = new Int32Array(1);
     this.initAudioState();
 
     this.bindControls();
+    this.bindHudSections();
     this.bindZoom();
+    this.bindOrbit();
     this.bindManualPulse();
     this.bindAudioControls();
 
@@ -164,11 +195,11 @@ class CapsuleFerrofluid {
   }
 
   async loadHdriEnvironment() {
-    this.setHdriStatus("HDRI: loading Studio Wizja 01...");
+    this.setHdriStatus("HDRI: loading Sunny Rose Garden...");
 
-    const primaryLoaded = await this.tryLoadHdri(STUDIO_WIZJA_01_URL, "Studio Wizja 01");
+    const primaryLoaded = await this.tryLoadHdri(SUNNY_ROSE_GARDEN_URL, "Sunny Rose Garden");
     if (primaryLoaded) {
-      this.setHdriStatus("HDRI: Studio Wizja 01 (online)");
+      this.setHdriStatus("HDRI: Sunny Rose Garden (local)");
       return;
     }
 
@@ -247,6 +278,40 @@ class CapsuleFerrofluid {
     const py = Math.round(clamp(v, 0, 1) * (this.hdriHeight - 1));
     const index = py * this.hdriStride + px * 4;
     return [this.hdriPixels[index], this.hdriPixels[index + 1], this.hdriPixels[index + 2]];
+  }
+
+  sampleLedRingDirection(dx, dy, dz, strength = 1) {
+    const len = Math.hypot(dx, dy, dz) || 1;
+    const x = dx / len;
+    const y = dy / len;
+    const z = dz / len;
+
+    let biasX = this.params.pointLightOffsetX;
+    let biasY = this.params.pointLightOffsetY;
+    const biasLen = Math.hypot(biasX, biasY);
+    if (biasLen < 0.001) {
+      biasX = 0.92;
+      biasY = -0.28;
+    } else {
+      biasX /= biasLen;
+      biasY /= biasLen;
+    }
+
+    // Ring lives on the capsule sidewall: strongest near grazing (|z| ~ 0).
+    const sideBand = Math.exp(-Math.pow(Math.abs(z) / 0.36, 2.2));
+    const primary = Math.pow(clamp((x * biasX + y * biasY + 1) * 0.5, 0, 1), 2.35);
+    const opposite = Math.pow(clamp((x * -biasX + y * -biasY + 1) * 0.5, 0, 1), 2.7);
+    const angle = Math.atan2(y, x);
+    const u = ((angle / TAU) % 1 + 1) % 1;
+    const segment = Math.floor(u * 72);
+    const segmentJitter = 0.78 + hash2(segment, 17) * 0.46;
+
+    const ringIntensity =
+      sideBand * (0.14 + primary * 1.04 + opposite * 0.42) * segmentJitter * clamp(strength, 0, 2.5);
+    const r = clamp(Math.round(this.pointLightColor[0] * 255 * ringIntensity), 0, 255);
+    const g = clamp(Math.round(this.pointLightColor[1] * 255 * ringIntensity), 0, 255);
+    const b = clamp(Math.round(this.pointLightColor[2] * 255 * ringIntensity), 0, 255);
+    return [r, g, b];
   }
 
   setAudioStatus(message) {
@@ -687,19 +752,23 @@ class CapsuleFerrofluid {
       "cameraOffsetX",
       "cameraYaw",
       "cameraOffsetY",
-      "spikeAmount",
       "pulseHz",
       "pulseAggression",
       "density",
       "viscosity",
       "resistance",
+      "surfaceTension",
       "pointLightIntensity",
+      "sideLightStrength",
+      "envLightStrength",
       "pointLightOffsetX",
       "pointLightOffsetY",
       "exposure",
-      "ambientStrength",
-      "occlusionStrength",
       "fluidTint",
+      "reflectivity",
+      "impactHighlights",
+      "flakeAmount",
+      "iridescenceStrength",
       "audioSensitivity",
       "audioSmoothing",
       "audioThreshold",
@@ -717,20 +786,25 @@ class CapsuleFerrofluid {
         this.params[id] = numeric;
         if (id === "renderQuality") {
           output.textContent = numeric.toFixed(2);
+        } else if (id === "viscosity") {
+          output.textContent = numeric.toFixed(3);
         } else if (
           id === "cameraOffsetX" ||
           id === "cameraOffsetY" ||
-          id === "spikeAmount" ||
           id === "density" ||
-          id === "viscosity" ||
           id === "resistance" ||
+          id === "surfaceTension" ||
           id === "pointLightIntensity" ||
+          id === "sideLightStrength" ||
+          id === "envLightStrength" ||
           id === "pointLightOffsetX" ||
           id === "pointLightOffsetY" ||
           id === "exposure" ||
-          id === "ambientStrength" ||
-          id === "occlusionStrength" ||
           id === "fluidTint" ||
+          id === "reflectivity" ||
+          id === "impactHighlights" ||
+          id === "flakeAmount" ||
+          id === "iridescenceStrength" ||
           id === "audioSensitivity" ||
           id === "audioSmoothing" ||
           id === "audioThreshold"
@@ -758,7 +832,7 @@ class CapsuleFerrofluid {
       pointLightColorOutput instanceof HTMLOutputElement
     ) {
       const updatePointLightColor = () => {
-        this.params.pointLightColorHex = pointLightColorInput.value || "#ffffff";
+        this.params.pointLightColorHex = pointLightColorInput.value || "#ff0000";
         this.pointLightColor = hexToRgb01(this.params.pointLightColorHex);
         pointLightColorOutput.textContent = this.params.pointLightColorHex.toLowerCase();
       };
@@ -770,7 +844,7 @@ class CapsuleFerrofluid {
     const fluidColorOutput = document.getElementById("fluidColor-value");
     if (fluidColorInput instanceof HTMLInputElement && fluidColorOutput instanceof HTMLOutputElement) {
       const updateFluidColor = () => {
-        this.params.fluidColorHex = fluidColorInput.value || "#4a1688";
+        this.params.fluidColorHex = fluidColorInput.value || "#0062ff";
         this.fluidColor = hexToRgb01(this.params.fluidColorHex);
         fluidColorOutput.textContent = this.params.fluidColorHex.toLowerCase();
       };
@@ -782,6 +856,8 @@ class CapsuleFerrofluid {
       { id: "showSpeaker", key: "showSpeaker" },
       { id: "manualPulse", key: "manualPulse" },
       { id: "audioReactive", key: "audioReactive" },
+      { id: "enableOrbitDrag", key: "enableOrbitDrag" },
+      { id: "useHdriReflections", key: "useHdriReflections" },
     ];
 
     for (const control of checkboxControls) {
@@ -805,6 +881,32 @@ class CapsuleFerrofluid {
     }
   }
 
+  bindHudSections() {
+    const sections = document.querySelectorAll(".hud-section[data-collapsible]");
+    for (const section of sections) {
+      if (!(section instanceof HTMLElement)) {
+        continue;
+      }
+      const toggle = section.querySelector(".hud-section-toggle");
+      if (!(toggle instanceof HTMLButtonElement)) {
+        continue;
+      }
+
+      const defaultCollapsed = section.dataset.defaultCollapsed === "true";
+      if (defaultCollapsed) {
+        section.classList.add("collapsed");
+        toggle.setAttribute("aria-expanded", "false");
+      } else {
+        toggle.setAttribute("aria-expanded", "true");
+      }
+
+      toggle.addEventListener("click", () => {
+        const collapsed = section.classList.toggle("collapsed");
+        toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      });
+    }
+  }
+
   bindZoom() {
     this.canvas.addEventListener(
       "wheel",
@@ -818,12 +920,93 @@ class CapsuleFerrofluid {
     );
   }
 
+  isOrbitGesture(event) {
+    if (!this.params.enableOrbitDrag) {
+      return false;
+    }
+    return event.button === 2 || (event.button === 0 && (event.altKey || event.shiftKey));
+  }
+
+  bindOrbit() {
+    this.canvas.addEventListener("contextmenu", (event) => {
+      if (this.params.enableOrbitDrag) {
+        event.preventDefault();
+      }
+    });
+
+    this.canvas.addEventListener("pointerdown", (event) => {
+      if (!this.isOrbitGesture(event)) {
+        return;
+      }
+      event.preventDefault();
+      this.orbitActive = true;
+      this.orbitPointerId = event.pointerId;
+      this.orbitLastX = event.clientX;
+      this.orbitLastY = event.clientY;
+      if (typeof this.canvas.setPointerCapture === "function") {
+        try {
+          this.canvas.setPointerCapture(event.pointerId);
+        } catch {
+          // Ignore unsupported capture edge-cases.
+        }
+      }
+    });
+
+    this.canvas.addEventListener("pointermove", (event) => {
+      if (!this.orbitActive || event.pointerId !== this.orbitPointerId) {
+        return;
+      }
+      const dx = event.clientX - this.orbitLastX;
+      const dy = event.clientY - this.orbitLastY;
+      this.orbitLastX = event.clientX;
+      this.orbitLastY = event.clientY;
+      this.orbitYaw = clamp(this.orbitYaw + dx * 0.14, -40, 40);
+      this.orbitPitch = clamp(this.orbitPitch + dy * 0.12, -24, 24);
+      this.updateViewOffset();
+      this.updatePointLightPosition();
+    });
+
+    const releaseOrbit = (event) => {
+      if (event && this.orbitActive && event.pointerId === this.orbitPointerId) {
+        if (typeof this.canvas.releasePointerCapture === "function") {
+          try {
+            this.canvas.releasePointerCapture(event.pointerId);
+          } catch {
+            // Ignore unsupported capture edge-cases.
+          }
+        }
+      }
+      this.orbitActive = false;
+      this.orbitPointerId = -1;
+    };
+
+    this.canvas.addEventListener("pointerup", releaseOrbit);
+    this.canvas.addEventListener("pointercancel", releaseOrbit);
+    window.addEventListener("blur", () => {
+      this.orbitActive = false;
+      this.orbitPointerId = -1;
+    });
+
+    const resetButton = document.getElementById("resetOrbitView");
+    if (resetButton instanceof HTMLButtonElement) {
+      resetButton.addEventListener("click", () => {
+        this.orbitYaw = 0;
+        this.orbitPitch = 0;
+        this.updateViewOffset();
+        this.updatePointLightPosition();
+      });
+    }
+  }
+
   bindManualPulse() {
     const releasePulse = () => {
       this.manualPulseHeld = false;
     };
 
     this.canvas.addEventListener("pointerdown", (event) => {
+      if (this.isOrbitGesture(event)) {
+        return;
+      }
       if (event.button !== 0 && event.pointerType !== "touch") {
         return;
       }
@@ -860,8 +1043,9 @@ class CapsuleFerrofluid {
     if (!this.capsule) {
       return;
     }
-    this.pointLightX = this.capsule.cx + this.capsule.rx * this.params.pointLightOffsetX;
-    this.pointLightY = this.capsule.cy + this.capsule.ry * this.params.pointLightOffsetY;
+    const biasScale = 0.22;
+    this.pointLightX = this.capsule.cx + this.capsule.rx * this.params.pointLightOffsetX * biasScale;
+    this.pointLightY = this.capsule.cy + this.capsule.ry * this.params.pointLightOffsetY * biasScale;
   }
 
   updateViewOffset() {
@@ -870,8 +1054,10 @@ class CapsuleFerrofluid {
       this.viewOffsetY = 0;
       return;
     }
-    this.viewOffsetX = this.capsule.rx * this.params.cameraOffsetX;
-    this.viewOffsetY = this.capsule.ry * this.params.cameraOffsetY;
+    const orbitX = clamp(this.orbitYaw / 40, -1, 1) * 0.06;
+    const orbitY = clamp(this.orbitPitch / 24, -1, 1) * 0.06;
+    this.viewOffsetX = this.capsule.rx * (this.params.cameraOffsetX + orbitX);
+    this.viewOffsetY = this.capsule.ry * (this.params.cameraOffsetY + orbitY);
   }
 
   resize() {
@@ -916,19 +1102,20 @@ class CapsuleFerrofluid {
     this.neighborRadiusSq = this.neighborRadius * this.neighborRadius;
     this.isolationLinkRadius = this.neighborRadius * 0.72;
     this.repulsionRadius = this.scale * 0.05;
-    this.magnetRange = this.scale * 0.58;
-    this.magnetClamp = 2800;
+    this.magnetRange = this.scale * 0.5;
+    this.magnetClamp = 1800;
     this.maxSpeed = this.scale * 6.2;
 
     this.isoLevel = 1.68;
-    this.isoSoftness = 0.24;
-    this.edgeFeather = 0.085;
-    this.normalScale = 1.45;
+    this.isoSoftness = 0.26;
+    this.edgeFeather = 0.095;
+    this.normalScale = 1.28;
 
-    this.sigma = this.scale * 0.102;
+    this.sigma = this.scale * 0.106;
     this.invSigma2 = 1 / (2 * this.sigma * this.sigma);
     this.influenceRadius = this.sigma * 3.1;
     this.influenceRadiusSq = this.influenceRadius * this.influenceRadius;
+    this.fieldGridCellSize = Math.max(1, this.influenceRadius);
 
     this.fieldBounds = {
       x: this.capsule.cx - this.capsule.rx,
@@ -936,6 +1123,9 @@ class CapsuleFerrofluid {
       w: this.capsule.rx * 2,
       h: this.capsule.ry * 2,
     };
+    this.fieldGridCols = Math.max(1, Math.ceil(this.fieldBounds.w / this.fieldGridCellSize));
+    this.fieldGridRows = Math.max(1, Math.ceil(this.fieldBounds.h / this.fieldGridCellSize));
+    this.fieldGridHeads = new Int32Array(this.fieldGridCols * this.fieldGridRows);
 
     const dprFactor = 0.96 + this.dpr * 0.28;
     const targetH = clamp(
@@ -949,6 +1139,8 @@ class CapsuleFerrofluid {
 
     this.fieldCanvas.width = this.fieldWidth;
     this.fieldCanvas.height = this.fieldHeight;
+    this.fluidShadowCanvas.width = Math.max(80, Math.round(this.fieldWidth * this.shadowScale));
+    this.fluidShadowCanvas.height = Math.max(80, Math.round(this.fieldHeight * this.shadowScale));
 
     this.fieldImageData = this.fieldCtx.createImageData(this.fieldWidth, this.fieldHeight);
     this.fieldValues = new Float32Array(this.fieldWidth * this.fieldHeight);
@@ -1019,6 +1211,14 @@ class CapsuleFerrofluid {
     this.pw = new Float32Array(count);
     this.neighborCounts = new Uint16Array(count);
     this.isolatedParticles = new Uint8Array(count);
+    this.isolationAlpha = new Float32Array(count);
+    this.componentParent = new Int32Array(count);
+    this.componentSize = new Uint16Array(count);
+    this.componentRoot = new Int32Array(count);
+    this.fieldGridNext = new Int32Array(count);
+    this.tensionX = new Float32Array(count);
+    this.tensionY = new Float32Array(count);
+    this.tensionW = new Float32Array(count);
 
     this.resetParticles();
   }
@@ -1038,6 +1238,7 @@ class CapsuleFerrofluid {
       // Vary visual mass so detached droplets are not uniform circles.
       const sizeMix = Math.random();
       this.pw[i] = 0.48 + sizeMix * sizeMix * 0.96;
+      this.isolationAlpha[i] = 0;
     }
   }
 
@@ -1065,13 +1266,53 @@ class CapsuleFerrofluid {
   step(dt) {
     const count = this.params.particleCount;
     const densityScale = this.params.density;
-    const viscosityStrength = this.params.viscosity * 2.1;
+    const viscosityInput = clamp(this.params.viscosity, 0, 1.2);
+    const viscosityStrength = Math.pow(viscosityInput, 1.85) * 2.4;
     this.updatePointLightPosition();
     this.updateViewOffset();
 
     this.fx.fill(0);
     this.fy.fill(0);
     this.neighborCounts.fill(0);
+    this.tensionX.fill(0);
+    this.tensionY.fill(0);
+    this.tensionW.fill(0);
+
+    const componentParent = this.componentParent;
+    const componentSize = this.componentSize;
+    const componentRoot = this.componentRoot;
+    for (let i = 0; i < count; i += 1) {
+      componentParent[i] = i;
+      componentSize[i] = 1;
+    }
+
+    const findComponentRoot = (index) => {
+      let root = index;
+      while (componentParent[root] !== root) {
+        root = componentParent[root];
+      }
+      while (componentParent[index] !== index) {
+        const next = componentParent[index];
+        componentParent[index] = root;
+        index = next;
+      }
+      return root;
+    };
+
+    const unionComponents = (a, b) => {
+      let rootA = findComponentRoot(a);
+      let rootB = findComponentRoot(b);
+      if (rootA === rootB) {
+        return;
+      }
+      if (componentSize[rootA] < componentSize[rootB]) {
+        const swap = rootA;
+        rootA = rootB;
+        rootB = swap;
+      }
+      componentParent[rootB] = rootA;
+      componentSize[rootA] += componentSize[rootB];
+    };
 
     let comX = 0;
     let comY = 0;
@@ -1102,10 +1343,18 @@ class CapsuleFerrofluid {
         if (dist < this.isolationLinkRadius) {
           this.neighborCounts[i] += 1;
           this.neighborCounts[j] += 1;
+          unionComponents(i, j);
         }
 
         const ratio = dist / this.neighborRadius;
         const cohesionWeight = Math.max(0, 1 - ratio);
+        const tensionWeight = cohesionWeight * cohesionWeight;
+        this.tensionX[i] += this.px[j] * tensionWeight;
+        this.tensionY[i] += this.py[j] * tensionWeight;
+        this.tensionW[i] += tensionWeight;
+        this.tensionX[j] += ix * tensionWeight;
+        this.tensionY[j] += iy * tensionWeight;
+        this.tensionW[j] += tensionWeight;
         let force =
           (ratio - this.params.clusterBalance) *
           this.params.cohesion *
@@ -1114,7 +1363,8 @@ class CapsuleFerrofluid {
 
         if (dist < this.repulsionRadius) {
           const q = 1 - dist / this.repulsionRadius;
-          force -= this.params.repulsion * densityScale * q * q;
+          const repulsionDamping = 1 - clamp(this.params.surfaceTension * 0.12, 0, 0.36);
+          force -= this.params.repulsion * densityScale * repulsionDamping * q * q;
         }
 
         const fx = nx * force;
@@ -1140,8 +1390,27 @@ class CapsuleFerrofluid {
       }
     }
 
+    let mainComponentRoot = 0;
+    let mainComponentSize = 0;
     for (let i = 0; i < count; i += 1) {
-      this.isolatedParticles[i] = this.neighborCounts[i] <= 1 ? 1 : 0;
+      const root = findComponentRoot(i);
+      componentRoot[i] = root;
+      const size = componentSize[root];
+      if (size > mainComponentSize) {
+        mainComponentSize = size;
+        mainComponentRoot = root;
+      }
+    }
+
+    for (let i = 0; i < count; i += 1) {
+      const root = componentRoot[i];
+      const detachedClusterSize = componentSize[root];
+      // Detachment by connected components prevents edge particles from flickering
+      // into detached mode when they are still part of the main blob.
+      const target = root !== mainComponentRoot && detachedClusterSize >= 2 ? 1 : 0;
+      const rate = target === 1 ? 4.8 : 22.0;
+      this.isolationAlpha[i] += (target - this.isolationAlpha[i]) * clamp(rate * dt, 0, 1);
+      this.isolatedParticles[i] = this.isolationAlpha[i] > 0.8 ? 1 : 0;
     }
 
     const audioSignal = this.sampleAudioSignal(dt);
@@ -1171,60 +1440,61 @@ class CapsuleFerrofluid {
 
     const aggressiveAudio = this.params.audioReactive && audioSignal.active;
     const envelopeRise = this.params.manualPulse
-      ? 18
+      ? 42
+      : aggressiveAudio
+        ? isInOutDrive
+          ? 132
+          : 116
+        : isInOutDrive
+          ? 44
+          : 24;
+    const envelopeFall = this.params.manualPulse
+      ? 28
       : aggressiveAudio
         ? isInOutDrive
           ? 86
-          : 70
+          : 74
         : isInOutDrive
-          ? 28
-          : 14;
-    const envelopeFall = this.params.manualPulse
-      ? 9
-      : aggressiveAudio
-        ? isInOutDrive
-          ? 46
-          : 36
-        : isInOutDrive
-          ? 16
-          : 11;
+          ? 30
+          : 17;
     const envelopeRate = pulseTarget > this.pulseEnvelope ? envelopeRise : envelopeFall;
     this.pulseEnvelope += (pulseTarget - this.pulseEnvelope) * clamp(envelopeRate * dt, 0, 1);
 
     const pulseDrive = clamp(this.pulseEnvelope, 0, 1);
+    const pulseDriveShaped = Math.pow(pulseDrive, 1.22);
+    const restRelax = 1 - smoothstep(0.08, 0.54, pulseDriveShaped);
     const pulseThreshold = aggressiveAudio ? (isInOutDrive ? 0.18 : 0.24) : isInOutDrive ? 0.4 : 0.52;
     const pulseOn = pulseDrive > pulseThreshold ? 1 : 0;
     const aggressionMix = clamp(this.params.pulseAggression / 8, 0, 1);
     const dynamicResistance =
       this.params.resistance /
-      (1 + pulseDrive * (0.9 + this.params.pulseAggression * 0.05));
-    const resistanceDamping = Math.exp(-dynamicResistance * 5 * dt);
+      (1 + pulseDriveShaped * (0.9 + this.params.pulseAggression * 0.05));
+    const resistanceDamping = Math.exp(-dynamicResistance * 3.2 * dt);
 
     const idleAudio = this.params.audioReactive && !audioSignal.active && !this.params.manualPulse;
     const baselineMagnet = this.params.manualPulse
       ? 0
       : isInOutDrive
-        ? idleAudio
-          ? 0
-          : 0.18
+        ? 0
         : idleAudio
           ? 0
-          : 1 - aggressionMix;
-    const magnetGate = baselineMagnet + (1 - baselineMagnet) * pulseDrive;
+          : (1 - aggressionMix) * 0.24;
+    const magnetGate = baselineMagnet + (1 - baselineMagnet) * pulseDriveShaped;
     const magnetBoost = isInOutDrive
-      ? 0.82 + pulseDrive * (0.85 + this.params.pulseAggression * 0.24)
-      : 1 + this.params.pulseAggression * (0.55 + pulseDrive * 1.05) * pulseDrive;
+      ? 0.72 + pulseDriveShaped * (0.95 + this.params.pulseAggression * 0.2)
+      : 1 + this.params.pulseAggression * (0.55 + pulseDriveShaped * 1.05) * pulseDriveShaped;
     const audioBoost =
       aggressiveAudio && !this.params.manualPulse
         ? 1.28 + audioSignal.drive * 1.52 + audioSignal.impact * 0.72
         : 1;
-    const centerPullGain = this.params.manualPulse
-      ? 0.06 + pulseDrive * 0.94
+    const centerPullGainRaw = this.params.manualPulse
+      ? 0.0015 + pulseDriveShaped * 0.52
       : isInOutDrive
         ? idleAudio
-          ? 0.03
-          : 0.14 + pulseDrive * 0.86
-        : 0.28 + pulseDrive * 0.72;
+          ? 0.0015
+          : 0.008 + pulseDriveShaped * 0.3
+        : 0.045 + pulseDriveShaped * 0.42;
+    const centerPullGain = Math.max(0, centerPullGainRaw * (1 - restRelax * 0.92));
     const jitterGain = this.params.manualPulse
       ? pulseDrive
       : isInOutDrive
@@ -1232,11 +1502,43 @@ class CapsuleFerrofluid {
           ? 0
           : 0.08 + pulseDrive * 0.38
         : 0.2 + pulseDrive * 0.8;
+    const restTensionDamp = this.params.manualPulse
+      ? 0.18 + pulseDriveShaped * 0.82
+      : isInOutDrive
+        ? idleAudio
+          ? 0.16
+          : 0.24 + pulseDriveShaped * 0.76
+        : 0.58 + pulseDriveShaped * 0.42;
+    const surfaceTensionStrength =
+      this.params.surfaceTension *
+      densityScale *
+      (isInOutDrive ? 0.68 + pulseDriveShaped * 0.62 : 0.96) *
+      restTensionDamp;
 
-    const driverTravel = isInOutDrive ? this.scale * 0.016 : 0;
+    const driverTravel = isInOutDrive ? this.scale * 0.022 : 0;
     this.magnetX = this.magnetBaseX;
     this.magnetY = this.magnetBaseY + (0.5 - pulseDrive) * driverTravel;
+    const organicDrive = clamp(
+      0.16 + pulseDrive * 0.84 + (aggressiveAudio ? audioSignal.transient * 0.52 : 0),
+      0,
+      1.6,
+    );
+    const organicPhase = this.time * (isInOutDrive ? 19 : 13) + this.magnetOrganicPhase;
+    const targetOrganicX =
+      this.scale *
+      (Math.sin(organicPhase * 1.07) * 0.018 + Math.sin(organicPhase * 2.31 + 1.4) * 0.011) *
+      organicDrive;
+    const targetOrganicY =
+      this.scale *
+      (Math.cos(organicPhase * 1.19 + 0.7) * 0.012 + Math.sin(organicPhase * 2.03 + 0.2) * 0.009) *
+      organicDrive;
+    const organicFollow = clamp((isInOutDrive ? 34 : 26) * dt, 0, 1);
+    this.magnetOrganicX += (targetOrganicX - this.magnetOrganicX) * organicFollow;
+    this.magnetOrganicY += (targetOrganicY - this.magnetOrganicY) * organicFollow;
+    this.magnetX += this.magnetOrganicX;
+    this.magnetY += this.magnetOrganicY;
     this.pulseState = pulseDrive;
+    const pulseDelta = Math.abs(pulseDrive - this.prevPulseDrive);
 
     if (isInOutDrive && this.params.pulseAggression > 0.01) {
       const driveDelta = pulseDrive - this.prevPulseDrive;
@@ -1246,8 +1548,13 @@ class CapsuleFerrofluid {
           const mx = this.magnetX - this.px[i];
           const my = this.magnetY - this.py[i];
           const dist = Math.hypot(mx, my) + 0.0001;
-          this.vx[i] += (mx / dist) * travelKick;
-          this.vy[i] += (my / dist) * travelKick;
+          const nx = mx / dist;
+          const ny = my / dist;
+          const tx = -ny;
+          const ty = nx;
+          const swirl = Math.sin(this.time * 24 + i * 0.17);
+          this.vx[i] += nx * travelKick + tx * travelKick * 0.18 * swirl;
+          this.vy[i] += ny * travelKick + ty * travelKick * 0.18 * swirl;
         }
       }
     } else if (pulseOn === 1 && this.prevPulseOn === 0 && this.params.pulseAggression > 0.01) {
@@ -1256,8 +1563,13 @@ class CapsuleFerrofluid {
         const mx = this.magnetX - this.px[i];
         const my = this.magnetY - this.py[i];
         const dist = Math.hypot(mx, my) + 0.0001;
-        this.vx[i] += (mx / dist) * pulseKick;
-        this.vy[i] += (my / dist) * pulseKick;
+        const nx = mx / dist;
+        const ny = my / dist;
+        const tx = -ny;
+        const ty = nx;
+        const swirl = Math.sin(this.time * 27 + i * 0.23);
+        this.vx[i] += nx * pulseKick + tx * pulseKick * 0.22 * swirl;
+        this.vy[i] += ny * pulseKick + ty * pulseKick * 0.22 * swirl;
       }
     } else if (pulseOn === 0 && this.prevPulseOn === 1 && this.params.pulseAggression > 0.01) {
       const recoilKick = this.scale * this.params.pulseAggression * 0.046;
@@ -1265,8 +1577,13 @@ class CapsuleFerrofluid {
         const mx = this.magnetX - this.px[i];
         const my = this.magnetY - this.py[i];
         const dist = Math.hypot(mx, my) + 0.0001;
-        this.vx[i] -= (mx / dist) * recoilKick;
-        this.vy[i] -= (my / dist) * recoilKick;
+        const nx = mx / dist;
+        const ny = my / dist;
+        const tx = -ny;
+        const ty = nx;
+        const swirl = Math.sin(this.time * 21 + i * 0.19);
+        this.vx[i] -= nx * recoilKick - tx * recoilKick * 0.16 * swirl;
+        this.vy[i] -= ny * recoilKick - ty * recoilKick * 0.16 * swirl;
       }
     }
 
@@ -1295,6 +1612,7 @@ class CapsuleFerrofluid {
     this.prevPulseOn = pulseOn;
     this.prevPulseDrive = pulseDrive;
 
+    let speedAccum = 0;
     for (let i = 0; i < count; i += 1) {
       let ax = this.fx[i];
       let ay = this.fy[i];
@@ -1320,28 +1638,77 @@ class CapsuleFerrofluid {
       ax += (comX - this.px[i]) * this.params.centerPull * densityScale * centerPullGain;
       ay += (comY - this.py[i]) * this.params.centerPull * densityScale * centerPullGain;
 
-      ay += this.params.gravity;
+      if (surfaceTensionStrength > 0.0001 && this.tensionW[i] > 0.0001) {
+        const avgX = this.tensionX[i] / this.tensionW[i];
+        const avgY = this.tensionY[i] / this.tensionW[i];
+        const compactness = clamp(this.tensionW[i] / 4.4, 0, 1);
+        const boundaryFactor = 1 - compactness;
+        const tensionGain = surfaceTensionStrength * (0.42 + boundaryFactor * 1.92);
+        ax += (avgX - this.px[i]) * tensionGain;
+        ay += (avgY - this.py[i]) * tensionGain;
+      }
+
+      if (surfaceTensionStrength > 0.0001) {
+        const comDx = this.px[i] - comX;
+        const comDy = this.py[i] - comY;
+        const spreadNorm = Math.hypot(
+          comDx / Math.max(1, this.capsule.rx * 0.74),
+          comDy / Math.max(1, this.capsule.ry * 0.74),
+        );
+        const compactEdge = smoothstep(0.54, 1.16, spreadNorm);
+        const compactionGain =
+          surfaceTensionStrength *
+          (0.001 + pulseDriveShaped * 0.018) *
+          compactEdge *
+          (0.02 + pulseDriveShaped * 0.98);
+        ax += (comX - this.px[i]) * compactionGain;
+        ay += (comY - this.py[i]) * compactionGain;
+      }
+
+      ay += this.params.gravity * 1.8;
 
       ax += (Math.random() - 0.5) * this.params.jitter * jitterGain;
       ay += (Math.random() - 0.5) * this.params.jitter * 0.72 * jitterGain;
+      if (this.params.manualPulse && !this.manualPulseHeld) {
+        const idleDrift = this.scale * 0.0042;
+        ax += Math.sin(this.time * 0.93 + i * 1.73) * idleDrift;
+        ay += Math.cos(this.time * 1.11 - i * 1.37) * idleDrift * 0.82;
+      }
 
       this.vx[i] += ax * dt;
       this.vy[i] += ay * dt;
       this.vx[i] *= resistanceDamping;
       this.vy[i] *= resistanceDamping;
 
-      const speed = Math.hypot(this.vx[i], this.vy[i]);
+      let speed = Math.hypot(this.vx[i], this.vy[i]);
       if (speed > this.maxSpeed) {
         const scale = this.maxSpeed / speed;
         this.vx[i] *= scale;
         this.vy[i] *= scale;
+        speed = this.maxSpeed;
       }
+      speedAccum += speed;
 
       this.px[i] += this.vx[i] * dt;
       this.py[i] += this.vy[i] * dt;
 
       this.constrainToCapsule(i);
     }
+
+    const avgSpeed = speedAccum / Math.max(1, count);
+    const speedNorm = clamp(avgSpeed / Math.max(1, this.scale * 0.16), 0, 2.4);
+    const pulseImpact = clamp(pulseDelta * (isInOutDrive ? 18 : 13), 0, 1.35);
+    const audioImpact = this.params.audioReactive
+      ? clamp(audioSignal.transient * 0.9 + audioSignal.impact * 0.75, 0, 1.5)
+      : 0;
+    const targetMotionHighlight = clamp(
+      speedNorm * 0.42 + pulseImpact * 0.95 + pulseDrive * 0.22 + audioImpact,
+      0,
+      2.2,
+    );
+    const motionFollow = targetMotionHighlight > this.motionHighlight ? 12 : 4.8;
+    this.motionHighlight +=
+      (targetMotionHighlight - this.motionHighlight) * clamp(motionFollow * dt, 0, 1);
   }
 
   constrainToCapsule(index) {
@@ -1386,29 +1753,60 @@ class CapsuleFerrofluid {
     const width = this.fieldWidth;
     const height = this.fieldHeight;
     const count = this.params.particleCount;
+    const px = this.px;
+    const py = this.py;
+    const pw = this.pw;
+    const isolatedParticles = this.isolatedParticles;
+    const gridHeads = this.fieldGridHeads;
+    const gridNext = this.fieldGridNext;
+    const gridCols = this.fieldGridCols;
+    const gridRows = this.fieldGridRows;
+    const invGridCellSize = 1 / this.fieldGridCellSize;
+    const gridOriginX = this.fieldBounds.x;
+    const gridOriginY = this.fieldBounds.y;
+
+    gridHeads.fill(-1);
+    for (let i = 0; i < count; i += 1) {
+      let gx = Math.floor((px[i] - gridOriginX) * invGridCellSize);
+      let gy = Math.floor((py[i] - gridOriginY) * invGridCellSize);
+      gx = clamp(gx, 0, gridCols - 1);
+      gy = clamp(gy, 0, gridRows - 1);
+      const cellIndex = gy * gridCols + gx;
+      gridNext[i] = gridHeads[cellIndex];
+      gridHeads[cellIndex] = i;
+    }
 
     let pointer = 0;
     for (let y = 0; y < height; y += 1) {
       const worldY = this.worldYs[y];
+      const cellY = clamp(Math.floor((worldY - gridOriginY) * invGridCellSize), 0, gridRows - 1);
 
       for (let x = 0; x < width; x += 1) {
         const worldX = this.worldXs[x];
+        const cellX = clamp(Math.floor((worldX - gridOriginX) * invGridCellSize), 0, gridCols - 1);
         let fieldValue = 0;
         let isolatedValue = 0;
 
-        for (let i = 0; i < count; i += 1) {
-          const dx = worldX - this.px[i];
-          const dy = worldY - this.py[i];
-          const distSq = dx * dx + dy * dy;
-
-          if (distSq > this.influenceRadiusSq) {
-            continue;
-          }
-
-          const contribution = Math.exp(-distSq * this.invSigma2) * this.pw[i];
-          fieldValue += contribution;
-          if (this.isolatedParticles[i] === 1) {
-            isolatedValue += contribution;
+        for (let gy = Math.max(0, cellY - 1); gy <= Math.min(gridRows - 1, cellY + 1); gy += 1) {
+          const rowOffset = gy * gridCols;
+          for (let gx = Math.max(0, cellX - 1); gx <= Math.min(gridCols - 1, cellX + 1); gx += 1) {
+            let particleIndex = gridHeads[rowOffset + gx];
+            while (particleIndex !== -1) {
+              const dx = worldX - px[particleIndex];
+              const dy = worldY - py[particleIndex];
+              const distSq = dx * dx + dy * dy;
+              if (distSq <= this.influenceRadiusSq) {
+                const contribution = Math.exp(-distSq * this.invSigma2) * pw[particleIndex];
+                fieldValue += contribution;
+                if (isolatedParticles[particleIndex] === 1) {
+                  const detachedWeight = smoothstep(0.82, 0.99, this.isolationAlpha[particleIndex]);
+                  if (detachedWeight > 0.001) {
+                    isolatedValue += contribution * detachedWeight;
+                  }
+                }
+              }
+              particleIndex = gridNext[particleIndex];
+            }
           }
         }
 
@@ -1420,6 +1818,56 @@ class CapsuleFerrofluid {
 
     const data = this.fieldImageData.data;
     pointer = 0;
+    const renderQualityNorm = clamp((this.params.renderQuality - 0.6) / (2.4 - 0.6), 0, 1);
+    const lowQuality = 1 - renderQualityNorm;
+    const qualityHotspotScale = 0.62 + renderQualityNorm * 0.38;
+    const ambientStrength = clamp(this.params.ambientStrength, 0, 1);
+    const occlusionStrength = clamp(this.params.occlusionStrength, 0, 1);
+    const lightPower = Math.max(0, this.params.pointLightIntensity);
+    const sideLightStrength = clamp(this.params.sideLightStrength, 0, 2.5);
+    const envLightStrength = clamp(this.params.envLightStrength, 0, 2.5);
+    const reflectivity = clamp(this.params.reflectivity, 0, 2.2);
+    const impactHighlights = clamp(this.params.impactHighlights, 0, 2.5);
+    const flakeAmount = clamp(this.params.flakeAmount, 0, 1);
+    const iridescenceStrength = clamp(this.params.iridescenceStrength, 0, 2.4);
+    const motionHighlight = clamp(this.motionHighlight || 0, 0, 2.5);
+    const motionSpecGate = smoothstep(0.14, 1.02, motionHighlight);
+    const dynamicTightExponent = 210 + motionSpecGate * 320;
+    const tintMix = clamp(this.params.fluidTint, 0, 1);
+    const fluidR = this.fluidColor[0];
+    const fluidG = this.fluidColor[1];
+    const fluidB = this.fluidColor[2];
+    const fluidLuma = fluidR * 0.2126 + fluidG * 0.7152 + fluidB * 0.0722;
+    const safeLuma = Math.max(0.06, fluidLuma);
+    const tintHueR = clamp(fluidR / safeLuma, 0.3, 3.0);
+    const tintHueG = clamp(fluidG / safeLuma, 0.3, 3.0);
+    const tintHueB = clamp(fluidB / safeLuma, 0.3, 3.0);
+    const tintColorfulness = clamp(
+      (Math.max(fluidR, fluidG, fluidB) - Math.min(fluidR, fluidG, fluidB) - 0.02) / 0.78,
+      0,
+      1,
+    );
+    const pointTintR = 0.02 + this.pointLightColor[0] * 0.98;
+    const pointTintG = 0.02 + this.pointLightColor[1] * 0.98;
+    const pointTintB = 0.02 + this.pointLightColor[2] * 0.98;
+    const bounceColorR = 0.72 + this.pointLightColor[0] * 0.28;
+    const bounceColorG = 0.72 + this.pointLightColor[1] * 0.28;
+    const bounceColorB = 0.74 + this.pointLightColor[2] * 0.26;
+    const useEnvReflections = Boolean(this.params.useHdriReflections);
+    const hasHdri =
+      useEnvReflections && Boolean(this.hdriPixels && this.hdriWidth > 1 && this.hdriHeight > 1);
+    const hdriBoost = hasHdri ? 1.65 : 1.0;
+    const envAmbientGain = 0.35 + envLightStrength * 0.65;
+    const roomWhiteR = 248;
+    const roomWhiteG = 250;
+    const roomWhiteB = 255;
+    const whiteMixReduction = tintMix * (0.45 + tintColorfulness * 0.4);
+    const roomWhiteMixDiffuse = useEnvReflections
+      ? clamp((hasHdri ? 0.22 : 0.4) * (1 - whiteMixReduction), 0.04, 0.56)
+      : 0;
+    const roomWhiteMixMirror = useEnvReflections
+      ? clamp((hasHdri ? 0.3 : 0.52) * (1 - whiteMixReduction * 0.92), 0.06, 0.68)
+      : 0;
 
     for (let y = 0; y < height; y += 1) {
       for (let x = 0; x < width; x += 1) {
@@ -1427,29 +1875,60 @@ class CapsuleFerrofluid {
         const value = this.fieldValues[index];
         const isolatedValue = this.fieldIsolated[index];
 
-        const left = this.fieldValues[y * width + Math.max(0, x - 1)];
-        const right = this.fieldValues[y * width + Math.min(width - 1, x + 1)];
-        const up = this.fieldValues[Math.max(0, y - 1) * width + x];
-        const down = this.fieldValues[Math.min(height - 1, y + 1) * width + x];
+        const x0 = Math.max(0, x - 1);
+        const x1 = Math.min(width - 1, x + 1);
+        const y0 = Math.max(0, y - 1);
+        const y1 = Math.min(height - 1, y + 1);
+        const left = this.fieldValues[y * width + x0];
+        const right = this.fieldValues[y * width + x1];
+        const up = this.fieldValues[y0 * width + x];
+        const down = this.fieldValues[y1 * width + x];
+        const upLeft = this.fieldValues[y0 * width + x0];
+        const upRight = this.fieldValues[y0 * width + x1];
+        const downLeft = this.fieldValues[y1 * width + x0];
+        const downRight = this.fieldValues[y1 * width + x1];
 
-        // Soft cross blur on the scalar field to reduce jagged alpha cutouts.
-        const smoothValue = (value * 4 + left + right + up + down) * 0.125;
+        // Isotropic 3x3 blur to keep outlines round instead of cross-shaped.
+        const smoothValue =
+          (value * 4 +
+            (left + right + up + down) * 2 +
+            (upLeft + upRight + downLeft + downRight)) /
+          16;
 
-        const alphaField = value * 0.76 + smoothValue * 0.24;
-        const alphaBase = smoothstep(
-          this.isoLevel - (this.isoSoftness + this.edgeFeather),
-          this.isoLevel + (this.isoSoftness + this.edgeFeather),
+        const alphaField =
+          value * (0.76 + lowQuality * 0.1) + smoothValue * (0.24 - lowQuality * 0.1);
+        const isoWidth = this.isoSoftness + this.edgeFeather;
+        const alphaBaseSoft = smoothstep(
+          this.isoLevel - isoWidth,
+          this.isoLevel + isoWidth,
           alphaField,
         );
-        const alphaMain = Math.pow(alphaBase, 1.08);
+        const alphaBaseTight = smoothstep(
+          this.isoLevel - isoWidth * 0.52,
+          this.isoLevel + isoWidth * 0.52,
+          alphaField,
+        );
+        const alphaBase = alphaBaseSoft * 0.34 + alphaBaseTight * 0.66;
+        const alphaMain = Math.pow(alphaBase, 1.24 - lowQuality * 0.2);
         // Isolated-droplet pass only: detached particles can appear without edge circle artifacts.
-        const isolatedSeed = smoothstep(0.4, 1.12, isolatedValue);
-        const nearMain = smoothstep(this.isoLevel - 0.22, this.isoLevel + 0.04, alphaField);
-        const alphaDroplet = isolatedSeed * (1 - nearMain) * 0.65;
-        const coverage = clamp(alphaMain + alphaDroplet, 0, 1);
-        const edgeAlpha = smoothstep(0.006, 0.16, coverage);
-        const coreOpacity = smoothstep(0.18, 0.34, coverage);
-        const alpha = clamp(edgeAlpha * (0.42 + coreOpacity * 0.58), 0, 1);
+        const isolatedSeed = smoothstep(0.92, 1.52, isolatedValue);
+        const nearMain = smoothstep(this.isoLevel - 0.68, this.isoLevel + 0.34, alphaField);
+        const alphaDroplet = isolatedSeed * (1 - nearMain) * 0.16;
+        const dropletBlend = clamp(alphaDroplet / Math.max(0.0001, alphaMain + alphaDroplet), 0, 1);
+        let coverage = clamp(alphaMain + alphaDroplet, 0, 1);
+        const coverageTight = smoothstep(0.03, 0.97, coverage);
+        coverage = coverage * 0.34 + coverageTight * 0.66;
+        const edgeAlpha = smoothstep(0.012, 0.11, coverage);
+        const coreOpacity = smoothstep(0.15, 0.31, coverage);
+        let alpha = clamp(edgeAlpha * (0.46 + coreOpacity * 0.54), 0, 1);
+        if (dropletBlend > 0.001) {
+          const detachedEdge = smoothstep(0.24, 0.76, coverage);
+          const detachedCore = smoothstep(0.32, 0.9, coverage);
+          const detachedShape = detachedEdge * 0.45 + detachedCore * 0.55;
+          alpha *= 1 - dropletBlend * (1 - detachedShape);
+        }
+        const coreBoost = smoothstep(this.isoLevel + 0.22, this.isoLevel + 1.08, smoothValue);
+        alpha = clamp(alpha + coreBoost * (0.08 + lowQuality * 0.16) * (1 - dropletBlend * 0.6), 0, 1);
 
         if (alpha <= 0.001) {
           data[pointer] = 0;
@@ -1469,54 +1948,67 @@ class CapsuleFerrofluid {
         ny /= nLength;
         nz /= nLength;
 
-        const body = clamp((smoothValue - this.isoLevel) * 0.52, 0, 1);
+        const body = clamp((smoothValue - this.isoLevel) * 0.56, 0, 1);
+        const volumeMask = smoothstep(this.isoLevel - 0.08, this.isoLevel + 1.35, smoothValue);
         const worldX = this.worldXs[x];
         const worldY = this.worldYs[y];
-        const mdx = this.magnetX - worldX;
-        const mdy = this.magnetY - worldY;
-        const magnetDist = Math.hypot(mdx, mdy) + 0.0001;
-        const magnetNx = mdx / magnetDist;
-        const magnetNy = mdy / magnetDist;
-        const magnetInfluence = 1 - smoothstep(0.18, 1.0, magnetDist / (this.scale * 0.62));
-        const spikePulse = Math.pow(clamp(this.pulseState, 0, 1), 1.2);
-        const spikeSurface = smoothstep(this.isoLevel - 0.02, this.isoLevel + 0.35, alphaField);
-        const spikeNoise = clamp(
-          0.5 +
-            Math.sin((worldX * 0.032 + worldY * 0.027 + this.time * 4.8) * TAU) * 0.28 +
-            Math.cos((worldX * 0.041 - worldY * 0.019 - this.time * 3.9) * TAU) * 0.22,
+
+        const fresnel = Math.pow(1 - nz, 2.05);
+        const surfaceProfile = clamp(
+          smoothstep(0, 1, body) * 0.72 + Math.pow(volumeMask, 0.78) * 0.28,
           0,
           1,
         );
-        const spikeMask = clamp(
-          this.params.spikeAmount * spikePulse * magnetInfluence * spikeSurface * spikeNoise,
-          0,
-          1.2,
-        );
+        const surfaceZ = (surfaceProfile - 0.42) * this.scale * 0.48;
 
-        if (spikeMask > 0.0001) {
-          nx += magnetNx * spikeMask * 0.42;
-          ny += magnetNy * spikeMask * 0.42;
-          nz = Math.max(0.08, nz - spikeMask * 0.34);
-          const spikeLength = Math.hypot(nx, ny, nz) || 1;
-          nx /= spikeLength;
-          ny /= spikeLength;
-          nz /= spikeLength;
+        const ledCenterX = this.capsule.cx;
+        const ledCenterY = this.capsule.cy;
+        let ringDirXRaw =
+          worldX -
+          ledCenterX +
+          this.capsule.rx * this.params.pointLightOffsetX * 0.32;
+        let ringDirYRaw =
+          worldY -
+          ledCenterY +
+          this.capsule.ry * this.params.pointLightOffsetY * 0.32;
+        if (Math.abs(ringDirXRaw) + Math.abs(ringDirYRaw) < 0.0001) {
+          ringDirXRaw = this.capsule.rx * 0.24;
+          ringDirYRaw = this.capsule.ry * 0.03;
         }
+        const ledNormDen = Math.hypot(
+          ringDirXRaw / Math.max(1, this.capsule.rx * 0.98),
+          ringDirYRaw / Math.max(1, this.capsule.ry * 0.98),
+        );
+        const safeLedNorm = Math.max(0.0001, ledNormDen);
+        const ledRimX = ledCenterX + ringDirXRaw / safeLedNorm;
+        const ledRimY = ledCenterY + ringDirYRaw / safeLedNorm;
+        const ledOppX = ledCenterX - ringDirXRaw / safeLedNorm;
+        const ledOppY = ledCenterY - ringDirYRaw / safeLedNorm;
+        const radialNorm = Math.hypot(
+          (worldX - this.capsule.cx) / Math.max(1, this.capsule.rx),
+          (worldY - this.capsule.cy) / Math.max(1, this.capsule.ry),
+        );
+        const ledWrap = 0.26 + smoothstep(0.04, 0.96, radialNorm) * 0.74;
+        const rimSpecBias = smoothstep(0.22, 0.98, radialNorm);
+        const centerSpecDamp = 0.14 + rimSpecBias * 0.86;
+        const coreVolumeDamp =
+          1 - smoothstep(0.4, 0.95, body) * (0.26 + (1 - rimSpecBias) * 0.36);
 
-        const fresnel = Math.pow(1 - nz, 2.05);
-        const surfaceZ = (smoothValue - this.isoLevel) * this.scale * 0.14;
-
-        const lightX = this.pointLightX - worldX;
-        const lightY = this.pointLightY - worldY;
-        const lightZ = this.scale * 0.58 - surfaceZ;
+        const lightX = ledRimX - worldX;
+        const lightY = ledRimY - worldY;
+        const lightZ = this.scale * 0.42 - surfaceZ;
         const lightLen = Math.hypot(lightX, lightY, lightZ) || 1;
         const lx = lightX / lightLen;
         const ly = lightY / lightLen;
         const lz = lightZ / lightLen;
 
-        const lightPower = Math.max(0, this.params.pointLightIntensity);
-        const attenuation = 1 / (1 + (lightLen * lightLen) / (this.scale * this.scale * 2.2));
-        const pointDiffuse = Math.max(0, nx * lx + ny * ly + nz * lz) * attenuation * lightPower;
+        const attenuation = 1 / (1 + (lightLen * lightLen) / (this.scale * this.scale * 1.45));
+        const pointDiffuse =
+          Math.max(0, nx * lx + ny * ly + nz * lz) *
+          attenuation *
+          lightPower *
+          ledWrap *
+          sideLightStrength;
 
         const hx = lx;
         const hy = ly;
@@ -1527,61 +2019,197 @@ class CapsuleFerrofluid {
         const pzh = hz / hLen;
 
         const pointHalf = Math.max(0, nx * pxh + ny * pyh + nz * pzh);
-        const pointSpecular = Math.pow(pointHalf, 96) * attenuation * lightPower;
-        const pointSpecularTight = Math.pow(pointHalf, 220) * attenuation * lightPower;
-        const spikeSpecular =
-          Math.pow(pointHalf, 280) * attenuation * lightPower * (0.25 + spikeMask * 1.75);
-        const spikeDirectional =
-          Math.pow(Math.max(0, nx * magnetNx + ny * magnetNy), 18) *
+        const pointSpecular =
+          Math.pow(pointHalf, 96) *
           attenuation *
           lightPower *
-          spikeMask;
-
+          ledWrap *
+          sideLightStrength *
+          (0.18 + motionSpecGate * 1.35) *
+          centerSpecDamp;
+        const pointSpecularTight =
+          Math.pow(pointHalf, dynamicTightExponent) *
+          attenuation *
+          lightPower *
+          ledWrap *
+          sideLightStrength *
+          (0.2 + motionSpecGate * 3.1) *
+          centerSpecDamp *
+          coreVolumeDamp;
+        const bounceX = ledOppX - worldX;
+        const bounceY = ledOppY - worldY;
+        const bounceZ = this.scale * 0.4 - surfaceZ;
+        const bounceLen = Math.hypot(bounceX, bounceY, bounceZ) || 1;
+        const blx = bounceX / bounceLen;
+        const bly = bounceY / bounceLen;
+        const blz = bounceZ / bounceLen;
+        const bounceAttenuation = 1 / (1 + (bounceLen * bounceLen) / (this.scale * this.scale * 2.9));
+        const bounceDiffuseRaw =
+          Math.max(0, nx * blx + ny * bly + nz * blz) *
+          bounceAttenuation *
+          lightPower *
+          (0.18 + ledWrap * 0.34) *
+          sideLightStrength;
+        const bhx = blx;
+        const bhy = bly;
+        const bhz = blz + 1;
+        const bhLen = Math.hypot(bhx, bhy, bhz) || 1;
+        const bbx = bhx / bhLen;
+        const bby = bhy / bhLen;
+        const bbz = bhz / bhLen;
+        const bounceHalf = Math.max(0, nx * bbx + ny * bby + nz * bbz);
+        const bounceSpecularRaw =
+          Math.pow(bounceHalf, 64) *
+          bounceAttenuation *
+          lightPower *
+          (0.12 + ledWrap * 0.2) *
+          sideLightStrength;
         // Ambient comes from a hemisphere model with cavity occlusion (not flat global fill).
-        const ambientStrength = clamp(this.params.ambientStrength, 0, 1);
-        const occlusionStrength = clamp(this.params.occlusionStrength, 0, 1);
         const rx = 2 * nx * nz;
         const ry = 2 * ny * nz;
+        const rz = 2 * nz * nz - 1;
         const envV = clamp(ry * 0.5 + 0.5, 0, 1);
-        const ambientRoom = 5 + (1 - envV) * 8 + envV * 3;
+        const ambientRoom = 1.7 + (1 - envV) * 2.6 + envV * 1.05;
         const ambientFacing = clamp(nz * 0.78 + (1 - Math.abs(ny)) * 0.22, 0, 1);
         const edgeDensity = smoothstep(0.05, 0.24, coverage);
         const cavity = smoothstep(0.22, 0.98, body);
-        const occlusion = clamp(1 - occlusionStrength * cavity * (0.86 - edgeDensity * 0.42), 0.2, 1);
+        const occlusion = clamp(
+          1 - occlusionStrength * cavity * (0.86 - edgeDensity * 0.42),
+          0.32,
+          1,
+        );
         const envSkyR = 108;
         const envSkyG = 120;
         const envSkyB = 144;
         const envGroundR = 22;
         const envGroundG = 26;
         const envGroundB = 34;
-        const envColorR = envGroundR + (envSkyR - envGroundR) * envV;
-        const envColorG = envGroundG + (envSkyG - envGroundG) * envV;
-        const envColorB = envGroundB + (envSkyB - envGroundB) * envV;
+        let envDiffuseColorR = envGroundR + (envSkyR - envGroundR) * envV;
+        let envDiffuseColorG = envGroundG + (envSkyG - envGroundG) * envV;
+        let envDiffuseColorB = envGroundB + (envSkyB - envGroundB) * envV;
+        let envMirrorColorR = envDiffuseColorR;
+        let envMirrorColorG = envDiffuseColorG;
+        let envMirrorColorB = envDiffuseColorB;
+        const hdriDiffuseSample = useEnvReflections ? this.sampleHdriDirection(nx, ny, nz) : null;
+        if (hdriDiffuseSample) {
+          envDiffuseColorR = hdriDiffuseSample[0];
+          envDiffuseColorG = hdriDiffuseSample[1];
+          envDiffuseColorB = hdriDiffuseSample[2];
+        }
+        const hdriMirrorSample = useEnvReflections ? this.sampleHdriDirection(rx, ry, rz) : null;
+        if (hdriMirrorSample) {
+          envMirrorColorR = hdriMirrorSample[0];
+          envMirrorColorG = hdriMirrorSample[1];
+          envMirrorColorB = hdriMirrorSample[2];
+        }
+        const ledEnvStrength = useEnvReflections
+          ? clamp(
+              sideLightStrength * (0.34 + envLightStrength * 0.46) * (0.3 + lightPower * 0.7),
+              0,
+              2.4,
+            )
+          : 0;
+        if (ledEnvStrength > 0.001) {
+          const ledDiffuseSample = this.sampleLedRingDirection(nx, ny, nz, ledEnvStrength);
+          const ledMirrorSample = this.sampleLedRingDirection(rx, ry, rz, ledEnvStrength * 1.18);
+          const ledDiffuseMix = clamp(0.18 + ledEnvStrength * 0.26, 0.04, 0.9);
+          const ledMirrorMix = clamp(0.26 + ledEnvStrength * 0.34, 0.06, 0.96);
+          envDiffuseColorR = envDiffuseColorR * (1 - ledDiffuseMix) + ledDiffuseSample[0] * ledDiffuseMix;
+          envDiffuseColorG = envDiffuseColorG * (1 - ledDiffuseMix) + ledDiffuseSample[1] * ledDiffuseMix;
+          envDiffuseColorB = envDiffuseColorB * (1 - ledDiffuseMix) + ledDiffuseSample[2] * ledDiffuseMix;
+          envMirrorColorR = envMirrorColorR * (1 - ledMirrorMix) + ledMirrorSample[0] * ledMirrorMix;
+          envMirrorColorG = envMirrorColorG * (1 - ledMirrorMix) + ledMirrorSample[1] * ledMirrorMix;
+          envMirrorColorB = envMirrorColorB * (1 - ledMirrorMix) + ledMirrorSample[2] * ledMirrorMix;
+        }
+        envDiffuseColorR = envDiffuseColorR * (1 - roomWhiteMixDiffuse) + roomWhiteR * roomWhiteMixDiffuse;
+        envDiffuseColorG = envDiffuseColorG * (1 - roomWhiteMixDiffuse) + roomWhiteG * roomWhiteMixDiffuse;
+        envDiffuseColorB = envDiffuseColorB * (1 - roomWhiteMixDiffuse) + roomWhiteB * roomWhiteMixDiffuse;
+        envMirrorColorR = envMirrorColorR * (1 - roomWhiteMixMirror) + roomWhiteR * roomWhiteMixMirror;
+        envMirrorColorG = envMirrorColorG * (1 - roomWhiteMixMirror) + roomWhiteG * roomWhiteMixMirror;
+        envMirrorColorB = envMirrorColorB * (1 - roomWhiteMixMirror) + roomWhiteB * roomWhiteMixMirror;
         const ambientDiffuse = ambientStrength * (0.24 + ambientFacing * 0.76) * occlusion;
         const pointGlint =
-          Math.pow(Math.max(0, nx * lx + ny * ly + nz * lz), 36) * attenuation * lightPower;
+          Math.pow(Math.max(0, nx * lx + ny * ly + nz * lz), 36) *
+          attenuation *
+          lightPower *
+          sideLightStrength *
+          centerSpecDamp;
         const pointHotspot =
-          (pointSpecularTight * 860 +
-            pointSpecular * 240 +
-            pointGlint * 120 +
-            spikeSpecular * 760 +
-            spikeDirectional * 240) *
-          (0.28 + edgeDensity * 0.72);
+          (pointSpecularTight * 520 +
+            pointSpecular * 170 +
+            pointGlint * 90) *
+          (0.28 + edgeDensity * 0.72) *
+          qualityHotspotScale;
+        const bounceEnergy =
+          (bounceDiffuseRaw * 12 + bounceSpecularRaw * 88) *
+          (0.34 + edgeDensity * 0.66) *
+          occlusion *
+          qualityHotspotScale *
+          (0.44 + reflectivity * 0.56);
+        const specEdgeMask = smoothstep(
+          0.26,
+          0.86,
+          alphaMain * 0.56 + coverage * 0.18 + rimSpecBias * 0.78,
+        );
+        const detachedSpecDamp = 1 - dropletBlend * 0.62;
+        const coreHighlightDamp =
+          1 - smoothstep(0.44, 0.98, body) * (0.36 + ambientStrength * 0.28);
+        const clusterHighlightDamp = 1 - smoothstep(0.62, 0.98, alphaMain) * 0.26;
+        const highlightDamp = clamp(coreHighlightDamp * clusterHighlightDamp, 0.52, 1);
 
-        const baseTone = 1.8 + body * 4.2;
-        const lightSplash = pointDiffuse * 15 * (0.2 + edgeDensity * 0.8);
-        const edgeSheen = fresnel * 8;
+        const baseTone = 0.66 + body * 1.46;
+        const lightSplash = pointDiffuse * 4.8 * (0.18 + edgeDensity * 0.82);
+        const edgeSheen = fresnel * 2.35;
 
-        let tone = baseTone + ambientRoom + lightSplash + edgeSheen + ambientDiffuse * 9;
-        tone = applyContrast(compressHighlight(tone, 0.9), 1.08);
+        let tone =
+          baseTone +
+          ambientRoom * 0.52 * envAmbientGain +
+          lightSplash +
+          edgeSheen +
+          ambientDiffuse * 3.2 * envAmbientGain;
+        const toneDepthDamp = 0.82 + rimSpecBias * 0.24;
+        tone = applyContrast(compressHighlight(tone, 1.16), 1.18) * toneDepthDamp;
 
+        const directSpecGain =
+          (0.08 + clamp(lightPower / 1.2, 0, 1) * 0.34) *
+          (0.14 + sideLightStrength * 0.48) *
+          (0.3 + motionSpecGate * 1.8) *
+          (0.6 + impactHighlights * 0.9);
         const whiteMirror =
-          (pointSpecular * 176 + pointSpecularTight * 420 + spikeSpecular * 420) *
-          (0.24 + edgeDensity * 0.76);
-        const pointTintR = 0.02 + this.pointLightColor[0] * 0.98;
-        const pointTintG = 0.02 + this.pointLightColor[1] * 0.98;
-        const pointTintB = 0.02 + this.pointLightColor[2] * 0.98;
-        const coloredHotspot = pointHotspot * (0.3 + lightPower * 0.5);
+          (pointSpecular * 220 + pointSpecularTight * 760 + fresnel * (18 + lightPower * 56)) *
+          (0.24 + edgeDensity * 0.76) *
+          specEdgeMask *
+          detachedSpecDamp *
+          centerSpecDamp *
+          coreVolumeDamp *
+          reflectivity *
+          directSpecGain *
+          highlightDamp *
+          sideLightStrength;
+        const impactFlash =
+          Math.pow(pointHalf, 320 + motionSpecGate * 260) *
+          attenuation *
+          lightPower *
+          ledWrap *
+          sideLightStrength *
+          (0.24 + reflectivity * 0.76) *
+          specEdgeMask *
+          detachedSpecDamp *
+          centerSpecDamp *
+          coreVolumeDamp *
+          highlightDamp *
+          motionSpecGate *
+          impactHighlights *
+          qualityHotspotScale *
+          (24 + motionSpecGate * 460);
+        const coloredHotspot =
+          pointHotspot *
+          (0.3 + lightPower * 0.5) *
+          (0.34 + reflectivity * 0.66) *
+          specEdgeMask *
+          centerSpecDamp *
+          coreVolumeDamp *
+          detachedSpecDamp;
         const ft = clamp(nz, 0, 1);
         const iridescenceT = (1 - ft) * 3.6 + (1 - pointHalf) * 2.1 + body * 0.35;
         const iridescenceR = 0.5 + 0.5 * Math.cos(TAU * (iridescenceT + 0.0));
@@ -1591,65 +2219,130 @@ class CapsuleFerrofluid {
         const iridescenceSpec = clamp(
           pointSpecular * 2.8 +
             pointSpecularTight * 3.2 +
-            spikeSpecular * 2.2 +
-            spikeDirectional * 1.8 +
             pointDiffuse * 0.35,
           0,
           1,
         );
-        const iridescence = iridescenceEdge * iridescenceSpec * (0.16 + lightPower * 0.54) * 188;
-        const tintMix = clamp(this.params.fluidTint, 0, 1);
-        const fluidLuma =
-          this.fluidColor[0] * 0.2126 + this.fluidColor[1] * 0.7152 + this.fluidColor[2] * 0.0722;
-        const safeLuma = Math.max(0.06, fluidLuma);
-        const tintHueR = clamp(this.fluidColor[0] / safeLuma, 0.3, 3.0);
-        const tintHueG = clamp(this.fluidColor[1] / safeLuma, 0.3, 3.0);
-        const tintHueB = clamp(this.fluidColor[2] / safeLuma, 0.3, 3.0);
-
-        const neutralBaseR = tone * 0.09;
-        const neutralBaseG = tone * 0.1;
-        const neutralBaseB = tone * 0.11;
-        const tintedBaseR = tone * (0.02 + this.fluidColor[0] * 0.34);
-        const tintedBaseG = tone * (0.02 + this.fluidColor[1] * 0.34);
-        const tintedBaseB = tone * (0.02 + this.fluidColor[2] * 0.34);
+        const iridescence =
+          iridescenceEdge *
+          iridescenceSpec *
+          (0.16 + lightPower * 0.54) *
+          188 *
+          specEdgeMask *
+          detachedSpecDamp *
+          iridescenceStrength;
+        const flakeScale = Math.max(1, this.scale * 0.014);
+        const flakeCoordX = worldX / flakeScale;
+        const flakeCoordY = worldY / flakeScale;
+        const flakeNoiseA = hash2(flakeCoordX + this.time * 0.11, flakeCoordY - this.time * 0.07);
+        const flakeNoiseB = hash2(
+          flakeCoordX * 1.87 - this.time * 0.05,
+          flakeCoordY * 1.61 + this.time * 0.09,
+        );
+        const flakeMask = Math.pow(clamp(flakeNoiseA * 0.62 + flakeNoiseB * 0.38, 0, 1), 16);
+        const flakeVisibility =
+          flakeAmount *
+          specEdgeMask *
+          detachedSpecDamp *
+          (0.08 + pointSpecular * 2.4 + pointSpecularTight * 3.8 + fresnel * 0.35);
+        const flakeEnergy = flakeMask * flakeVisibility * (70 + lightPower * 90 + reflectivity * 65);
+        const flakeHue = hash2(flakeCoordX * 2.13 + 5.2, flakeCoordY * 2.41 - 1.4);
+        const flakeIriR = 0.5 + 0.5 * Math.cos(TAU * (flakeHue + 0.0));
+        const flakeIriG = 0.5 + 0.5 * Math.cos(TAU * (flakeHue + 0.33));
+        const flakeIriB = 0.5 + 0.5 * Math.cos(TAU * (flakeHue + 0.66));
+        const neutralBaseR = tone * 0.038;
+        const neutralBaseG = tone * 0.043;
+        const neutralBaseB = tone * 0.048;
+        const tintedBaseR = tone * (0.012 + fluidR * 0.22);
+        const tintedBaseG = tone * (0.012 + fluidG * 0.22);
+        const tintedBaseB = tone * (0.012 + fluidB * 0.22);
         const baseR = neutralBaseR + (tintedBaseR - neutralBaseR) * tintMix;
         const baseG = neutralBaseG + (tintedBaseG - neutralBaseG) * tintMix;
         const baseB = neutralBaseB + (tintedBaseB - neutralBaseB) * tintMix;
 
-        const mirrorTintStrength = tintMix * 0.7;
+        const mirrorTintStrength = tintMix * (0.48 + tintColorfulness * 0.95);
         const mirrorR = whiteMirror * (1 + (tintHueR - 1) * mirrorTintStrength);
         const mirrorG = whiteMirror * 1.01 * (1 + (tintHueG - 1) * mirrorTintStrength);
         const mirrorB = whiteMirror * 1.05 * (1 + (tintHueB - 1) * mirrorTintStrength);
-        const envDiffuse = (6 + body * 16) * ambientDiffuse;
-        const envDiffuseR = envDiffuse * (0.18 + (envColorR / 255) * 0.82);
-        const envDiffuseG = envDiffuse * (0.18 + (envColorG / 255) * 0.82);
-        const envDiffuseB = envDiffuse * (0.18 + (envColorB / 255) * 0.82);
-        const envMirror = (14 + fresnel * 54) * ambientStrength * occlusion;
-        const envMirrorR = envMirror * (0.2 + (envColorR / 255) * 0.8);
-        const envMirrorG = envMirror * (0.2 + (envColorG / 255) * 0.8);
-        const envMirrorB = envMirror * (0.2 + (envColorB / 255) * 0.8);
+        const mirrorEnvTintR = useEnvReflections ? 0.22 + Math.sqrt(envMirrorColorR / 255) * 1.22 : 1;
+        const mirrorEnvTintG = useEnvReflections ? 0.22 + Math.sqrt(envMirrorColorG / 255) * 1.22 : 1;
+        const mirrorEnvTintB = useEnvReflections ? 0.22 + Math.sqrt(envMirrorColorB / 255) * 1.22 : 1;
+        const mirrorSpecR = mirrorR * mirrorEnvTintR;
+        const mirrorSpecG = mirrorG * mirrorEnvTintG;
+        const mirrorSpecB = mirrorB * mirrorEnvTintB;
+        const envReflectionGain = useEnvReflections ? envLightStrength : 0;
+        const envDiffuseCoreDamp = 1 - smoothstep(0.56, 0.99, body) * 0.42;
+        const envDiffuse =
+          (2.9 + body * 8.2) *
+          ambientDiffuse *
+          hdriBoost *
+          0.6 *
+          envReflectionGain *
+          envDiffuseCoreDamp;
+        const envDiffuseR = envDiffuse * (0.18 + (envDiffuseColorR / 255) * 0.82);
+        const envDiffuseG = envDiffuse * (0.18 + (envDiffuseColorG / 255) * 0.82);
+        const envDiffuseB = envDiffuse * (0.18 + (envDiffuseColorB / 255) * 0.82);
+        const envMirrorAdd =
+          (62 + fresnel * 230) *
+          (0.24 + ambientStrength * 0.56) *
+          occlusion *
+          hdriBoost *
+          (0.46 + specEdgeMask * 0.54) *
+          detachedSpecDamp *
+          reflectivity *
+          envReflectionGain *
+          highlightDamp;
+        const envMirrorTintStrength = tintMix * (0.24 + tintColorfulness * 0.56);
+        const envMirrorR = envMirrorAdd * (0.2 + (envMirrorColorR / 255) * 0.8) * (1 + (tintHueR - 1) * envMirrorTintStrength);
+        const envMirrorG = envMirrorAdd * (0.2 + (envMirrorColorG / 255) * 0.8) * (1 + (tintHueG - 1) * envMirrorTintStrength);
+        const envMirrorB = envMirrorAdd * (0.2 + (envMirrorColorB / 255) * 0.8) * (1 + (tintHueB - 1) * envMirrorTintStrength);
+        const silverLiftBase =
+          (5 + fresnel * 16) *
+          (0.2 + ambientStrength * 0.56) *
+          occlusion *
+          hdriBoost *
+          envReflectionGain *
+          (0.34 + edgeDensity * 0.66) *
+          envDiffuseCoreDamp;
+        const silverLiftScale = clamp(1 - tintMix * (0.52 + tintColorfulness * 0.5), 0.2, 1);
+        const silverLift = silverLiftBase * silverLiftScale;
 
         let red =
           baseR +
           envDiffuseR +
-          mirrorR +
+          mirrorSpecR +
           envMirrorR +
+          bounceEnergy * bounceColorR +
+          silverLift * 0.98 +
           coloredHotspot * pointTintR +
-          iridescence * iridescenceR;
+          iridescence * iridescenceR +
+          impactFlash * 0.98;
         let green =
           baseG +
           envDiffuseG +
-          mirrorG +
+          mirrorSpecG +
           envMirrorG +
+          bounceEnergy * bounceColorG +
+          silverLift * 1.0 +
           coloredHotspot * pointTintG +
-          iridescence * iridescenceG;
+          iridescence * iridescenceG +
+          impactFlash * 1.0;
         let blue =
           baseB +
           envDiffuseB +
-          mirrorB +
+          mirrorSpecB +
           envMirrorB +
+          bounceEnergy * bounceColorB +
+          silverLift * 1.06 +
           coloredHotspot * pointTintB +
-          iridescence * iridescenceB;
+          iridescence * iridescenceB +
+          impactFlash * 1.03;
+        const flakeTintR = 0.72 + pointTintR * 0.28 + flakeIriR * iridescenceStrength * 0.22;
+        const flakeTintG = 0.72 + pointTintG * 0.28 + flakeIriG * iridescenceStrength * 0.22;
+        const flakeTintB = 0.74 + pointTintB * 0.26 + flakeIriB * iridescenceStrength * 0.24;
+        red += flakeEnergy * flakeTintR;
+        green += flakeEnergy * flakeTintG;
+        blue += flakeEnergy * flakeTintB;
 
         const exposure = clamp(this.params.exposure, 0.6, 1.8);
         red = toneMapACES(red, exposure);
@@ -1672,7 +2365,7 @@ class CapsuleFerrofluid {
     const ctx = this.ctx;
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.fillStyle = "#070b10";
+    ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, this.width, this.height);
 
     ctx.save();
@@ -1685,9 +2378,7 @@ class CapsuleFerrofluid {
     }
     this.applyCameraYawTransform();
 
-    this.drawWhiteRoom();
     this.drawCapsuleShadow();
-    this.drawEnvironmentLight();
     this.renderField();
     this.drawFluid();
     if (this.params.showSpeaker) {
@@ -1698,20 +2389,26 @@ class CapsuleFerrofluid {
   }
 
   applyCameraYawTransform() {
-    const yawDeg = this.params.cameraYaw || 0;
-    if (Math.abs(yawDeg) < 0.001) {
+    const yawDeg = (this.params.cameraYaw || 0) + this.orbitYaw;
+    const pitchDeg = this.orbitPitch;
+    if (Math.abs(yawDeg) < 0.001 && Math.abs(pitchDeg) < 0.001) {
       return;
     }
 
     const yawRad = (yawDeg * Math.PI) / 180;
+    const pitchRad = (pitchDeg * Math.PI) / 180;
     const cx = this.width * 0.5;
     const cy = this.height * 0.5;
     const skewX = Math.tan(yawRad) * 0.2;
-    const squeezeX = clamp(1 - Math.abs(yawRad) * 0.25, 0.8, 1);
-    const lift = Math.sin(Math.abs(yawRad)) * this.scale * 0.045;
+    const skewY = Math.tan(pitchRad) * 0.16;
+    const squeezeX = clamp(1 - Math.abs(yawRad) * 0.24, 0.76, 1.02);
+    const squeezeY = clamp(1 - Math.abs(pitchRad) * 0.18, 0.82, 1.04);
+    const lift =
+      Math.sin(Math.abs(yawRad)) * this.scale * 0.045 +
+      Math.sin(Math.abs(pitchRad)) * this.scale * 0.038;
 
     this.ctx.translate(cx, cy);
-    this.ctx.transform(squeezeX, 0, skewX, 1, 0, -lift);
+    this.ctx.transform(squeezeX, skewY, skewX, squeezeY, 0, -lift);
     this.ctx.translate(-cx, -cy);
   }
 
@@ -1756,146 +2453,82 @@ class CapsuleFerrofluid {
 
   drawWhiteRoom() {
     const ctx = this.ctx;
-    const { left, right, top, bottom, depth } = this.room;
-    const lr = Math.round(this.pointLightColor[0] * 255);
-    const lg = Math.round(this.pointLightColor[1] * 255);
-    const lb = Math.round(this.pointLightColor[2] * 255);
-    const lightPower = clamp(this.params.pointLightIntensity, 0, 2.4);
 
-    const insetX = depth * 0.84;
-    const insetY = depth * 0.54;
-    const backLeft = left + insetX;
-    const backRight = right - insetX;
-    const backTop = top + insetY;
-    const backBottom = bottom - insetY;
-    const lightX = this.pointLightX + this.viewOffsetX * 0.55;
-    const lightY = this.pointLightY + this.viewOffsetY * 0.55;
+    if (this.hdriWidth > 1 && this.hdriHeight > 1) {
+      const yawNorm = clamp((this.params.cameraYaw || 0) / 24, -1, 1);
+      const offsetNorm = clamp(this.viewOffsetX / Math.max(1, this.capsule.rx), -1, 1);
+      const panNorm = yawNorm * 0.18 + offsetNorm * 0.08;
 
-    const ceilingPoints = [
-      [left, top],
-      [right, top],
-      [backRight, backTop],
-      [backLeft, backTop],
-    ];
-    const leftPoints = [
-      [left, top],
-      [backLeft, backTop],
-      [backLeft, backBottom],
-      [left, bottom],
-    ];
-    const rightPoints = [
-      [right, top],
-      [backRight, backTop],
-      [backRight, backBottom],
-      [right, bottom],
-    ];
-    const backPoints = [
-      [backLeft, backTop],
-      [backRight, backTop],
-      [backRight, backBottom],
-      [backLeft, backBottom],
-    ];
-    const floorPoints = [
-      [left, bottom],
-      [right, bottom],
-      [backRight, backBottom],
-      [backLeft, backBottom],
-    ];
-
-    const fillPolygon = (points, color) => {
-      ctx.beginPath();
-      ctx.moveTo(points[0][0], points[0][1]);
-      for (let i = 1; i < points.length; i += 1) {
-        ctx.lineTo(points[i][0], points[i][1]);
-      }
-      ctx.closePath();
-      ctx.fillStyle = color;
-      ctx.fill();
-    };
-
-    const roomColor = (r, g, b, alpha) => `rgba(${r}, ${g}, ${b}, ${alpha})`;
-
-    const paintSurfaceLight = (points, spread, nearAlpha, midAlpha, biasX, biasY) => {
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(points[0][0], points[0][1]);
-      for (let i = 1; i < points.length; i += 1) {
-        ctx.lineTo(points[i][0], points[i][1]);
-      }
-      ctx.closePath();
-      ctx.clip();
-
-      const wallGlow = ctx.createRadialGradient(
-        lightX + biasX,
-        lightY + biasY,
-        this.scale * 0.06,
-        lightX + biasX,
-        lightY + biasY,
-        this.scale * spread,
+      const sourceHeight = Math.max(2, Math.round(this.hdriHeight * 0.74));
+      const sourceY = Math.round(this.hdriHeight * 0.1);
+      const sourceWidth = Math.max(
+        2,
+        Math.min(
+          this.hdriWidth,
+          Math.round((this.width / Math.max(1, this.height)) * sourceHeight * 1.12),
+        ),
       );
-      wallGlow.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, ${clamp(nearAlpha * lightPower, 0, 0.98)})`);
-      wallGlow.addColorStop(0.45, `rgba(${lr}, ${lg}, ${lb}, ${clamp(midAlpha * lightPower, 0, 0.7)})`);
-      wallGlow.addColorStop(1, `rgba(${lr}, ${lg}, ${lb}, 0)`);
-      ctx.fillStyle = wallGlow;
+      let sourceX = Math.floor(
+        (this.hdriWidth * (0.5 + panNorm) - sourceWidth * 0.5) % this.hdriWidth,
+      );
+      if (sourceX < 0) {
+        sourceX += this.hdriWidth;
+      }
+
+      ctx.save();
+      if (sourceX + sourceWidth <= this.hdriWidth) {
+        ctx.drawImage(
+          this.hdriCanvas,
+          sourceX,
+          sourceY,
+          sourceWidth,
+          sourceHeight,
+          0,
+          0,
+          this.width,
+          this.height,
+        );
+      } else {
+        const firstWidth = this.hdriWidth - sourceX;
+        const secondWidth = sourceWidth - firstWidth;
+        const firstDestWidth = (firstWidth / sourceWidth) * this.width;
+        ctx.drawImage(
+          this.hdriCanvas,
+          sourceX,
+          sourceY,
+          firstWidth,
+          sourceHeight,
+          0,
+          0,
+          firstDestWidth,
+          this.height,
+        );
+        ctx.drawImage(
+          this.hdriCanvas,
+          0,
+          sourceY,
+          secondWidth,
+          sourceHeight,
+          firstDestWidth,
+          0,
+          this.width - firstDestWidth,
+          this.height,
+        );
+      }
+
+      const topWash = ctx.createLinearGradient(0, 0, 0, this.height);
+      topWash.addColorStop(0, "rgba(255, 255, 255, 0.08)");
+      topWash.addColorStop(0.56, "rgba(255, 255, 255, 0.02)");
+      topWash.addColorStop(1, "rgba(0, 0, 0, 0.12)");
+      ctx.fillStyle = topWash;
       ctx.fillRect(0, 0, this.width, this.height);
       ctx.restore();
-    };
+      return;
+    }
 
     ctx.save();
-    ctx.fillStyle = roomColor(9, 14, 21, 1);
+    ctx.fillStyle = this.backgroundGradient;
     ctx.fillRect(0, 0, this.width, this.height);
-
-    fillPolygon(ceilingPoints, roomColor(20, 28, 40, 0.95));
-    fillPolygon(leftPoints, roomColor(15, 22, 34, 0.94));
-    fillPolygon(rightPoints, roomColor(14, 21, 33, 0.94));
-    fillPolygon(backPoints, roomColor(13, 20, 30, 0.94));
-    fillPolygon(floorPoints, roomColor(9, 15, 24, 0.98));
-
-    paintSurfaceLight(ceilingPoints, 2.9, 0.82, 0.3, 0, -this.scale * 0.22);
-    paintSurfaceLight(leftPoints, 2.35, 0.68, 0.24, -this.scale * 0.22, 0);
-    paintSurfaceLight(rightPoints, 2.35, 0.68, 0.24, this.scale * 0.22, 0);
-    paintSurfaceLight(backPoints, 2.6, 0.78, 0.29, 0, -this.scale * 0.08);
-    paintSurfaceLight(floorPoints, 2.2, 0.94, 0.36, 0, this.scale * 0.16);
-
-    const roomBounce = ctx.createRadialGradient(
-      lightX,
-      lightY,
-      this.scale * 0.04,
-      lightX,
-      lightY,
-      this.scale * 2.4,
-    );
-    roomBounce.addColorStop(
-      0,
-      `rgba(${Math.round(190 + this.pointLightColor[0] * 65)}, ${Math.round(190 + this.pointLightColor[1] * 65)}, ${Math.round(190 + this.pointLightColor[2] * 65)}, ${clamp(0.18 * lightPower, 0, 0.55)})`,
-    );
-    roomBounce.addColorStop(0.4, `rgba(${lr}, ${lg}, ${lb}, ${clamp(0.08 * lightPower, 0, 0.26)})`);
-    roomBounce.addColorStop(1, "rgba(0, 0, 0, 0)");
-    ctx.fillStyle = roomBounce;
-    ctx.fillRect(0, 0, this.width, this.height);
-
-    ctx.strokeStyle = `rgba(172, 190, 216, ${clamp(0.1 + lightPower * 0.08, 0.1, 0.34)})`;
-    ctx.lineWidth = Math.max(1, this.scale * 0.0045);
-    ctx.beginPath();
-    ctx.moveTo(backLeft, backTop);
-    ctx.lineTo(backLeft, backBottom);
-    ctx.lineTo(backRight, backBottom);
-    ctx.lineTo(backRight, backTop);
-    ctx.stroke();
-
-    const roomVignette = ctx.createRadialGradient(
-      this.width * 0.5,
-      this.height * 0.52,
-      this.scale * 0.2,
-      this.width * 0.5,
-      this.height * 0.52,
-      Math.max(this.width, this.height) * 0.72,
-    );
-    roomVignette.addColorStop(0, "rgba(0, 0, 0, 0)");
-    roomVignette.addColorStop(1, "rgba(0, 0, 0, 0.36)");
-    ctx.fillStyle = roomVignette;
-    ctx.fillRect(0, 0, this.width, this.height);
-
     ctx.restore();
   }
 
@@ -1926,11 +2559,187 @@ class CapsuleFerrofluid {
     const { cx, cy, rx, ry } = this.capsule;
     const fluidOffsetX = this.viewOffsetX;
     const fluidOffsetY = this.viewOffsetY;
+    const renderQualityNorm = clamp((this.params.renderQuality - 0.6) / (2.4 - 0.6), 0, 1);
+    const lowQuality = 1 - renderQualityNorm;
+    const fastShadowMode = this.params.renderQuality < 1.0;
+    const sideLightStrength = clamp(this.params.sideLightStrength, 0, 2.5);
+    const ledIntensity = Math.max(0, this.params.pointLightIntensity);
+    const ledCenterX = cx + fluidOffsetX + this.capsule.rx * this.params.pointLightOffsetX * 0.08;
+    const ledCenterY = cy + fluidOffsetY + this.capsule.ry * this.params.pointLightOffsetY * 0.08;
+    let ledDirX = this.params.pointLightOffsetX;
+    let ledDirY = this.params.pointLightOffsetY;
+    const ledDirLen = Math.hypot(ledDirX, ledDirY);
+    if (ledDirLen < 0.001) {
+      ledDirX = 0.92;
+      ledDirY = -0.28;
+    } else {
+      ledDirX /= ledDirLen;
+      ledDirY /= ledDirLen;
+    }
+    const lr = Math.round(this.pointLightColor[0] * 255);
+    const lg = Math.round(this.pointLightColor[1] * 255);
+    const lb = Math.round(this.pointLightColor[2] * 255);
 
     this.ctx.save();
     this.ctx.beginPath();
     this.ctx.ellipse(cx, cy, rx, ry, 0, 0, TAU);
     this.ctx.clip();
+
+    const interiorFill = this.ctx.createLinearGradient(cx, cy - ry, cx, cy + ry);
+    interiorFill.addColorStop(0, "rgba(248, 251, 255, 0.98)");
+    interiorFill.addColorStop(0.54, "rgba(237, 243, 252, 0.97)");
+    interiorFill.addColorStop(1, "rgba(222, 231, 242, 0.96)");
+    this.ctx.fillStyle = interiorFill;
+    this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
+
+    // Full interior wall lighting so the white backing plate responds to the LED ring.
+    const wallLightGain = clamp(sideLightStrength * (0.42 + ledIntensity * 0.66), 0, 3.2);
+    const wallLedX = cx + fluidOffsetX + ledDirX * rx * 0.94;
+    const wallLedY = cy + fluidOffsetY + ledDirY * ry * 0.94;
+    const wallBounceX = cx + fluidOffsetX - ledDirX * rx * 0.76;
+    const wallBounceY = cy + fluidOffsetY - ledDirY * ry * 0.76;
+    const wallHotspot = this.ctx.createRadialGradient(
+      wallLedX,
+      wallLedY,
+      this.scale * 0.01,
+      wallLedX,
+      wallLedY,
+      Math.max(rx, ry) * 1.38,
+    );
+    wallHotspot.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, ${clamp(0.34 * wallLightGain, 0, 0.7)})`);
+    wallHotspot.addColorStop(0.3, `rgba(${lr}, ${lg}, ${lb}, ${clamp(0.14 * wallLightGain, 0, 0.4)})`);
+    wallHotspot.addColorStop(1, "rgba(0, 0, 0, 0)");
+    this.ctx.save();
+    this.ctx.globalCompositeOperation = "screen";
+    this.ctx.filter = `blur(${Math.max(1.2, this.scale * 0.013)}px)`;
+    this.ctx.fillStyle = wallHotspot;
+    this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
+    this.ctx.restore();
+
+    const wallBounce = this.ctx.createRadialGradient(
+      wallBounceX,
+      wallBounceY,
+      this.scale * 0.06,
+      wallBounceX,
+      wallBounceY,
+      Math.max(rx, ry) * 1.22,
+    );
+    wallBounce.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, ${clamp(0.09 * wallLightGain, 0, 0.24)})`);
+    wallBounce.addColorStop(0.45, `rgba(${lr}, ${lg}, ${lb}, ${clamp(0.032 * wallLightGain, 0, 0.12)})`);
+    wallBounce.addColorStop(1, "rgba(0, 0, 0, 0)");
+    this.ctx.save();
+    this.ctx.globalCompositeOperation = "screen";
+    this.ctx.filter = `blur(${Math.max(1.4, this.scale * 0.016)}px)`;
+    this.ctx.fillStyle = wallBounce;
+    this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
+    this.ctx.restore();
+
+    const wallFalloff = this.ctx.createLinearGradient(
+      cx + fluidOffsetX + ledDirX * rx * 1.12,
+      cy + fluidOffsetY + ledDirY * ry * 1.12,
+      cx + fluidOffsetX - ledDirX * rx * 1.16,
+      cy + fluidOffsetY - ledDirY * ry * 1.16,
+    );
+    wallFalloff.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, ${clamp(0.08 * wallLightGain, 0, 0.2)})`);
+    wallFalloff.addColorStop(0.45, "rgba(0, 0, 0, 0)");
+    wallFalloff.addColorStop(1, `rgba(0, 0, 0, ${clamp(0.1 + wallLightGain * 0.07, 0.1, 0.32)})`);
+    this.ctx.save();
+    this.ctx.globalCompositeOperation = "soft-light";
+    this.ctx.fillStyle = wallFalloff;
+    this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
+    this.ctx.restore();
+
+    this.ctx.save();
+    this.ctx.globalCompositeOperation = "multiply";
+    this.ctx.globalAlpha = clamp(0.32 + wallLightGain * 0.1, 0.25, 0.52);
+    this.ctx.fillStyle = wallFalloff;
+    this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
+    this.ctx.restore();
+
+    // LED ring bounce on the capsule walls (interior shell), separated from fluid shading.
+    const wallLight = this.ctx.createLinearGradient(
+      ledCenterX + ledDirX * rx * 0.75,
+      ledCenterY + ledDirY * ry * 0.75,
+      ledCenterX - ledDirX * rx * 1.05,
+      ledCenterY - ledDirY * ry * 1.05,
+    );
+    const wallCoreAlpha = clamp(0.09 * sideLightStrength, 0, 0.28);
+    const wallMidAlpha = clamp(0.045 * sideLightStrength, 0, 0.18);
+    const wallFarAlpha = clamp(0.012 * sideLightStrength, 0, 0.08);
+    wallLight.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, ${wallCoreAlpha})`);
+    wallLight.addColorStop(0.4, `rgba(${lr}, ${lg}, ${lb}, ${wallMidAlpha})`);
+    wallLight.addColorStop(1, `rgba(${lr}, ${lg}, ${lb}, ${wallFarAlpha})`);
+
+    this.ctx.save();
+    this.ctx.globalCompositeOperation = "screen";
+    this.ctx.filter = `blur(${Math.max(1.5, this.scale * 0.014)}px)`;
+    this.ctx.strokeStyle = wallLight;
+    this.ctx.lineWidth = Math.max(4, this.scale * 0.12);
+    this.ctx.beginPath();
+    this.ctx.ellipse(cx + fluidOffsetX, cy + fluidOffsetY, rx * 0.95, ry * 0.95, 0, 0, TAU);
+    this.ctx.stroke();
+    this.ctx.restore();
+
+    if (this.fluidShadowCtx) {
+      const shadowWidth = this.fluidShadowCanvas.width;
+      const shadowHeight = this.fluidShadowCanvas.height;
+      this.fluidShadowCtx.clearRect(0, 0, shadowWidth, shadowHeight);
+      this.fluidShadowCtx.drawImage(this.fieldCanvas, 0, 0, shadowWidth, shadowHeight);
+      this.fluidShadowCtx.globalCompositeOperation = "source-in";
+      this.fluidShadowCtx.fillStyle = "rgba(0, 0, 0, 1)";
+      this.fluidShadowCtx.fillRect(0, 0, shadowWidth, shadowHeight);
+      this.fluidShadowCtx.globalCompositeOperation = "source-over";
+
+      const primaryShadowDx = this.scale * 0.012;
+      const primaryShadowDy = this.scale * 0.108;
+      this.ctx.save();
+      this.ctx.globalCompositeOperation = "multiply";
+      this.ctx.globalAlpha = fastShadowMode ? 0.32 : 0.42;
+      this.ctx.filter = fastShadowMode ? "none" : `blur(${Math.max(1.4, this.scale * 0.018)}px)`;
+      this.ctx.drawImage(
+        this.fluidShadowCanvas,
+        this.fieldBounds.x + fluidOffsetX + primaryShadowDx,
+        this.fieldBounds.y + fluidOffsetY + primaryShadowDy,
+        this.fieldBounds.w,
+        this.fieldBounds.h,
+      );
+      this.ctx.restore();
+
+      if (!fastShadowMode) {
+        this.ctx.save();
+        this.ctx.globalCompositeOperation = "multiply";
+        this.ctx.globalAlpha = 0.22;
+        this.ctx.filter = `blur(${Math.max(0.8, this.scale * 0.009)}px)`;
+        this.ctx.drawImage(
+          this.fluidShadowCanvas,
+          this.fieldBounds.x + fluidOffsetX + primaryShadowDx * 0.5,
+          this.fieldBounds.y + fluidOffsetY + primaryShadowDy * 0.56,
+          this.fieldBounds.w,
+          this.fieldBounds.h,
+        );
+        this.ctx.restore();
+      }
+
+      // LED occlusion shadow from fluid onto capsule walls.
+      const wallShadowDx = -ledDirX * this.scale * 0.14;
+      const wallShadowDy = -ledDirY * this.scale * 0.14;
+      this.ctx.save();
+      this.ctx.beginPath();
+      this.ctx.ellipse(cx + fluidOffsetX, cy + fluidOffsetY, rx * 0.99, ry * 0.99, 0, 0, TAU);
+      this.ctx.ellipse(cx + fluidOffsetX, cy + fluidOffsetY, rx * 0.8, ry * 0.8, 0, 0, TAU);
+      this.ctx.clip("evenodd");
+      this.ctx.globalCompositeOperation = "multiply";
+      this.ctx.globalAlpha = clamp(0.26 * sideLightStrength, 0.08, 0.42);
+      this.ctx.filter = `blur(${Math.max(1.8, this.scale * 0.02)}px)`;
+      this.ctx.drawImage(
+        this.fluidShadowCanvas,
+        this.fieldBounds.x + fluidOffsetX + wallShadowDx,
+        this.fieldBounds.y + fluidOffsetY + wallShadowDy,
+        this.fieldBounds.w,
+        this.fieldBounds.h,
+      );
+      this.ctx.restore();
+    }
 
     this.ctx.drawImage(
       this.fieldCanvas,
@@ -1940,31 +2749,56 @@ class CapsuleFerrofluid {
       this.fieldBounds.h,
     );
 
-    const lr = Math.round(this.pointLightColor[0] * 255);
-    const lg = Math.round(this.pointLightColor[1] * 255);
-    const lb = Math.round(this.pointLightColor[2] * 255);
-    const intensity = Math.max(0, this.params.pointLightIntensity);
-    const fluidCoreAlpha = clamp(0.07 * intensity, 0, 0.2);
-    const fluidMidAlpha = clamp(0.024 * intensity, 0, 0.08);
-    const fluidPointGlow = this.ctx.createRadialGradient(
-      this.pointLightX + fluidOffsetX,
-      this.pointLightY + fluidOffsetY,
-      this.scale * 0.02,
-      this.pointLightX + fluidOffsetX,
-      this.pointLightY + fluidOffsetY,
-      this.scale * 0.84,
+    const qualityGlowScale = 0.62 + renderQualityNorm * 0.38;
+    const fluidCoreAlpha = clamp(
+      0.07 * ledIntensity * qualityGlowScale * sideLightStrength * (1 - lowQuality * 0.2),
+      0,
+      0.2,
     );
-    fluidPointGlow.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, ${fluidCoreAlpha})`);
-    fluidPointGlow.addColorStop(0.42, `rgba(${lr}, ${lg}, ${lb}, ${fluidMidAlpha})`);
-    fluidPointGlow.addColorStop(1, `rgba(${lr}, ${lg}, ${lb}, 0)`);
-    this.ctx.fillStyle = fluidPointGlow;
-    this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
+    const fluidMidAlpha = clamp(0.024 * ledIntensity * qualityGlowScale * sideLightStrength, 0, 0.08);
+    const ringInnerWidth = Math.max(2, this.scale * 0.018);
+    const ringOuterWidth = Math.max(5, this.scale * 0.042);
+    const ringOuterAlpha = clamp(fluidMidAlpha * 1.25, 0, 0.18);
+    const ringInnerAlpha = clamp(fluidCoreAlpha * 1.05, 0, 0.24);
+
+    this.ctx.save();
+    this.ctx.globalCompositeOperation = "screen";
+    this.ctx.filter = `blur(${Math.max(2, this.scale * 0.022)}px)`;
+    this.ctx.strokeStyle = `rgba(${lr}, ${lg}, ${lb}, ${ringOuterAlpha})`;
+    this.ctx.lineWidth = ringOuterWidth;
+    this.ctx.beginPath();
+    this.ctx.ellipse(ledCenterX, ledCenterY, rx * 0.9, ry * 0.9, 0, 0, TAU);
+    this.ctx.stroke();
+    this.ctx.restore();
+
+    this.ctx.save();
+    this.ctx.globalCompositeOperation = "screen";
+    this.ctx.strokeStyle = `rgba(${lr}, ${lg}, ${lb}, ${ringInnerAlpha})`;
+    this.ctx.lineWidth = ringInnerWidth;
+    this.ctx.beginPath();
+    this.ctx.ellipse(ledCenterX, ledCenterY, rx * 0.9, ry * 0.9, 0, 0, TAU);
+    this.ctx.stroke();
+    this.ctx.restore();
 
     this.ctx.restore();
   }
 
   drawCapsuleGlass() {
     const { cx, cy, rx, ry } = this.capsule;
+    const sideLightStrength = clamp(this.params.sideLightStrength, 0, 2.5);
+    let ledDirX = this.params.pointLightOffsetX;
+    let ledDirY = this.params.pointLightOffsetY;
+    const ledDirLen = Math.hypot(ledDirX, ledDirY);
+    if (ledDirLen < 0.001) {
+      ledDirX = 0.92;
+      ledDirY = -0.28;
+    } else {
+      ledDirX /= ledDirLen;
+      ledDirY /= ledDirLen;
+    }
+    const lr = Math.round(this.pointLightColor[0] * 255);
+    const lg = Math.round(this.pointLightColor[1] * 255);
+    const lb = Math.round(this.pointLightColor[2] * 255);
 
     this.ctx.save();
     this.ctx.beginPath();
@@ -1986,6 +2820,26 @@ class CapsuleFerrofluid {
     this.ctx.ellipse(cx + rx * 0.18, cy + ry * 0.3, rx * 0.42, ry * 0.22, 0.2, 0.15, 1.45);
     this.ctx.strokeStyle = "rgba(154, 180, 212, 0.16)";
     this.ctx.lineWidth = Math.max(0.7, this.scale * 0.004);
+    this.ctx.stroke();
+
+    // LED tint response on the glass/rim so capsule walls react to LED color and bias.
+    const rimLight = this.ctx.createLinearGradient(
+      cx + ledDirX * rx * 0.98,
+      cy + ledDirY * ry * 0.98,
+      cx - ledDirX * rx * 1.02,
+      cy - ledDirY * ry * 1.02,
+    );
+    const rimHotAlpha = clamp(0.24 * sideLightStrength, 0.05, 0.36);
+    const rimMidAlpha = clamp(0.11 * sideLightStrength, 0.02, 0.2);
+    rimLight.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, ${rimHotAlpha})`);
+    rimLight.addColorStop(0.45, `rgba(${lr}, ${lg}, ${lb}, ${rimMidAlpha})`);
+    rimLight.addColorStop(1, `rgba(${lr}, ${lg}, ${lb}, 0.02)`);
+    this.ctx.globalCompositeOperation = "screen";
+    this.ctx.filter = `blur(${Math.max(1.0, this.scale * 0.008)}px)`;
+    this.ctx.strokeStyle = rimLight;
+    this.ctx.lineWidth = Math.max(1.2, this.scale * 0.009);
+    this.ctx.beginPath();
+    this.ctx.ellipse(cx, cy, rx * 0.995, ry * 0.995, 0, 0, TAU);
     this.ctx.stroke();
 
     this.ctx.restore();
