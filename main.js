@@ -1418,6 +1418,8 @@ class CapsuleFerrofluid {
 
     const audioSignal = this.sampleAudioSignal(dt);
     const isInOutDrive = this.params.driveMode === "inout";
+    const magnetSize = clamp(this.params.magnetSize, 0.35, 5.0);
+    const magnetSizeNorm = clamp((magnetSize - 0.35) / (5.0 - 0.35), 0, 1);
     let pulseTarget;
 
     if (this.params.manualPulse) {
@@ -1498,6 +1500,7 @@ class CapsuleFerrofluid {
           : 0.008 + pulseDriveShaped * 0.3
         : 0.045 + pulseDriveShaped * 0.42;
     const centerPullGain = Math.max(0, centerPullGainRaw * (1 - restRelax * 0.92));
+    const centerPullSizeDamp = 1 - magnetSizeNorm * (0.42 + pulseDriveShaped * 0.28);
     const jitterGain = this.params.manualPulse
       ? pulseDrive
       : isInOutDrive
@@ -1611,10 +1614,11 @@ class CapsuleFerrofluid {
       const magnetDistSq = mx * mx + my * my + 0.0001;
       const magnetDist = Math.sqrt(magnetDistSq);
 
-      const magnetSize = clamp(this.params.magnetSize, 0.35, 5.0);
       const rangeScale = isInOutDrive ? 0.74 + pulseDrive * 0.86 : 1;
       const effectiveMagnetRange = this.magnetRangeBase * magnetSize * rangeScale;
-      const magnetT = magnetDist / Math.max(1, effectiveMagnetRange);
+      const magnetFootprintRadius = this.scale * 0.072 * magnetSize;
+      const outsideDist = Math.max(0, magnetDist - magnetFootprintRadius);
+      const magnetT = outsideDist / Math.max(1, effectiveMagnetRange);
       let magnetForce = this.params.magnetStrength / (1 + magnetT * magnetT);
       magnetForce *= magnetGate * magnetBoost * audioBoost;
       const dynamicMagnetClamp =
@@ -1622,12 +1626,44 @@ class CapsuleFerrofluid {
         (1 + this.params.pulseAggression * pulseDrive * 0.32) *
         (aggressiveAudio ? 1.22 + audioSignal.drive * 0.68 : 1);
       magnetForce = Math.min(magnetForce, dynamicMagnetClamp);
+      const insideRatio = clamp(
+        magnetDist / Math.max(1, magnetFootprintRadius),
+        0,
+        1.6,
+      );
+      const corePullGain = smoothstep(0.12, 0.96, insideRatio);
+      magnetForce *= corePullGain;
 
       ax += (mx / magnetDist) * magnetForce;
       ay += (my / magnetDist) * magnetForce;
 
-      ax += (comX - this.px[i]) * this.params.centerPull * densityScale * centerPullGain;
-      ay += (comY - this.py[i]) * this.params.centerPull * densityScale * centerPullGain;
+      if (insideRatio < 1) {
+        // Inside the magnet footprint, bias outward slightly so bigger magnets
+        // spread the fluid across area instead of collapsing to a center point.
+        const spreadPhase = 1 - insideRatio;
+        const spreadForce =
+          this.params.magnetStrength *
+          magnetGate *
+          magnetBoost *
+          (0.008 + pulseDriveShaped * 0.014) *
+          spreadPhase *
+          spreadPhase;
+        ax -= (mx / magnetDist) * spreadForce;
+        ay -= (my / magnetDist) * spreadForce;
+      }
+
+      ax +=
+        (comX - this.px[i]) *
+        this.params.centerPull *
+        densityScale *
+        centerPullGain *
+        centerPullSizeDamp;
+      ay +=
+        (comY - this.py[i]) *
+        this.params.centerPull *
+        densityScale *
+        centerPullGain *
+        centerPullSizeDamp;
 
       if (surfaceTensionStrength > 0.0001 && this.tensionW[i] > 0.0001) {
         const avgX = this.tensionX[i] / this.tensionW[i];
