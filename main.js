@@ -1613,44 +1613,30 @@ class CapsuleFerrofluid {
       const my = this.magnetY - this.py[i];
       const magnetDistSq = mx * mx + my * my + 0.0001;
       const magnetDist = Math.sqrt(magnetDistSq);
+      const invMagnetDist = 1 / magnetDist;
 
-      const rangeScale = isInOutDrive ? 0.74 + pulseDrive * 0.86 : 1;
-      const effectiveMagnetRange = this.magnetRangeBase * magnetSize * rangeScale;
-      const magnetFootprintRadius = this.scale * 0.072 * magnetSize;
-      const outsideDist = Math.max(0, magnetDist - magnetFootprintRadius);
-      const magnetT = outsideDist / Math.max(1, effectiveMagnetRange);
-      let magnetForce = this.params.magnetStrength / (1 + magnetT * magnetT);
+      // Annular driver model: attract toward a ring radius rather than a center point.
+      // This better matches large-diameter ring electromagnets behind a capsule.
+      const ringRadius = this.scale * (0.055 + magnetSize * 0.088);
+      const ringBand = this.scale * (0.05 + magnetSize * 0.06);
+      const ringOffset = magnetDist - ringRadius;
+      const ringT = ringOffset / Math.max(1, ringBand);
+      const ringFalloff = 1 / (1 + ringT * ringT);
+      const ringSpring = clamp(Math.abs(ringOffset) / Math.max(1, ringBand * 1.35), 0, 2.8);
+      let magnetForce = this.params.magnetStrength * ringSpring * ringFalloff;
       magnetForce *= magnetGate * magnetBoost * audioBoost;
       const dynamicMagnetClamp =
         this.magnetClamp *
         (1 + this.params.pulseAggression * pulseDrive * 0.32) *
         (aggressiveAudio ? 1.22 + audioSignal.drive * 0.68 : 1);
       magnetForce = Math.min(magnetForce, dynamicMagnetClamp);
-      const insideRatio = clamp(
-        magnetDist / Math.max(1, magnetFootprintRadius),
-        0,
-        1.6,
-      );
-      const corePullGain = smoothstep(0.12, 0.96, insideRatio);
-      magnetForce *= corePullGain;
 
-      ax += (mx / magnetDist) * magnetForce;
-      ay += (my / magnetDist) * magnetForce;
-
-      if (insideRatio < 1) {
-        // Inside the magnet footprint, bias outward slightly so bigger magnets
-        // spread the fluid across area instead of collapsing to a center point.
-        const spreadPhase = 1 - insideRatio;
-        const spreadForce =
-          this.params.magnetStrength *
-          magnetGate *
-          magnetBoost *
-          (0.008 + pulseDriveShaped * 0.014) *
-          spreadPhase *
-          spreadPhase;
-        ax -= (mx / magnetDist) * spreadForce;
-        ay -= (my / magnetDist) * spreadForce;
-      }
+      // Direction toward ring centerline:
+      // - outside ring => pull inward (toward magnet center)
+      // - inside ring  => push outward (away from magnet center)
+      const ringSign = ringOffset > 0 ? 1 : -1;
+      ax += (mx * invMagnetDist) * magnetForce * ringSign;
+      ay += (my * invMagnetDist) * magnetForce * ringSign;
 
       ax +=
         (comX - this.px[i]) *
