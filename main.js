@@ -71,6 +71,7 @@ class CapsuleFerrofluid {
       viscosity: 0.05,
       resistance: 0.94,
       surfaceTension: 2.5,
+      blobCohesion: 1.35,
       pointLightColorHex: "#ff0000",
       useHdriReflections: true,
       pointLightIntensity: 1.0,
@@ -762,6 +763,7 @@ class CapsuleFerrofluid {
       "viscosity",
       "resistance",
       "surfaceTension",
+      "blobCohesion",
       "pointLightIntensity",
       "sideLightStrength",
       "envLightStrength",
@@ -800,6 +802,7 @@ class CapsuleFerrofluid {
           id === "density" ||
           id === "resistance" ||
           id === "surfaceTension" ||
+          id === "blobCohesion" ||
           id === "pointLightIntensity" ||
           id === "sideLightStrength" ||
           id === "envLightStrength" ||
@@ -1418,6 +1421,15 @@ class CapsuleFerrofluid {
       this.isolationAlpha[i] += (target - this.isolationAlpha[i]) * clamp(22 * dt, 0, 1);
       this.isolatedParticles[i] = 0;
     }
+    const blobCohesion = clamp(this.params.blobCohesion, 0, 3.0);
+    const detachedFactorFor = (index) => {
+      const root = componentRoot[index];
+      if (root === mainComponentRoot) {
+        return 0;
+      }
+      const size = componentSize[root];
+      return clamp((10 - size) / 10, 0, 1);
+    };
 
     const audioSignal = this.sampleAudioSignal(dt);
     const isInOutDrive = this.params.driveMode === "inout";
@@ -1564,8 +1576,14 @@ class CapsuleFerrofluid {
           const tx = -ny;
           const ty = nx;
           const swirl = Math.sin(this.time * 24 + i * 0.17);
-          this.vx[i] += nx * travelKick * ringSign + tx * travelKick * 0.18 * swirl;
-          this.vy[i] += ny * travelKick * ringSign + ty * travelKick * 0.18 * swirl;
+          const detachedFactor = detachedFactorFor(i);
+          const kickScale = 1 - detachedFactor * 0.58 * (blobCohesion / 3);
+          this.vx[i] +=
+            (nx * travelKick * ringSign + tx * travelKick * 0.18 * swirl) *
+            Math.max(0.22, kickScale);
+          this.vy[i] +=
+            (ny * travelKick * ringSign + ty * travelKick * 0.18 * swirl) *
+            Math.max(0.22, kickScale);
         }
       }
     } else if (pulseOn === 1 && this.prevPulseOn === 0 && this.params.pulseAggression > 0.01) {
@@ -1581,8 +1599,12 @@ class CapsuleFerrofluid {
         const tx = -ny;
         const ty = nx;
         const swirl = Math.sin(this.time * 27 + i * 0.23);
-        this.vx[i] += nx * pulseKick * ringSign + tx * pulseKick * 0.22 * swirl;
-        this.vy[i] += ny * pulseKick * ringSign + ty * pulseKick * 0.22 * swirl;
+        const detachedFactor = detachedFactorFor(i);
+        const kickScale = 1 - detachedFactor * 0.58 * (blobCohesion / 3);
+        this.vx[i] +=
+          (nx * pulseKick * ringSign + tx * pulseKick * 0.22 * swirl) * Math.max(0.22, kickScale);
+        this.vy[i] +=
+          (ny * pulseKick * ringSign + ty * pulseKick * 0.22 * swirl) * Math.max(0.22, kickScale);
       }
     }
 
@@ -1606,8 +1628,12 @@ class CapsuleFerrofluid {
         const tx = -ny;
         const ty = nx;
         const swirl = (Math.random() - 0.5) * audioSignal.transient * 0.7;
-        this.vx[i] += nx * transientKick * ringSign + tx * transientKick * swirl;
-        this.vy[i] += ny * transientKick * ringSign + ty * transientKick * swirl;
+        const detachedFactor = detachedFactorFor(i);
+        const kickScale = 1 - detachedFactor * 0.58 * (blobCohesion / 3);
+        this.vx[i] +=
+          (nx * transientKick * ringSign + tx * transientKick * swirl) * Math.max(0.22, kickScale);
+        this.vy[i] +=
+          (ny * transientKick * ringSign + ty * transientKick * swirl) * Math.max(0.22, kickScale);
       }
     }
     this.prevPulseOn = pulseOn;
@@ -1630,11 +1656,13 @@ class CapsuleFerrofluid {
       const ringBand = this.scale * (0.05 + magnetSize * 0.06);
       const ringOffset = magnetDist - ringRadius;
       const ringCenterDamp = smoothstep(0.34, 0.9, magnetDist / Math.max(1, ringRadius));
+      const detachedFactor = detachedFactorFor(i);
       const ringT = ringOffset / Math.max(1, ringBand);
       const ringFalloff = 1 / (1 + ringT * ringT);
       const ringSpring = clamp(Math.abs(ringOffset) / Math.max(1, ringBand * 1.35), 0, 2.8);
       let magnetForce = this.params.magnetStrength * ringSpring * ringFalloff;
       magnetForce *= magnetGate * magnetBoost * audioBoost;
+      magnetForce *= 1 - detachedFactor * 0.42 * (blobCohesion / 3);
       const dynamicMagnetClamp =
         this.magnetClamp *
         (1 + this.params.pulseAggression * pulseDrive * 0.32) *
@@ -1662,6 +1690,16 @@ class CapsuleFerrofluid {
         centerPullGain *
         centerPullSizeDamp *
         ringCenterDamp;
+
+      if (detachedFactor > 0.001) {
+        const rejoinGain =
+          this.scale *
+          (0.045 + pulseDriveShaped * 0.06) *
+          detachedFactor *
+          blobCohesion;
+        ax += (comX - this.px[i]) * rejoinGain;
+        ay += (comY - this.py[i]) * rejoinGain;
+      }
 
       if (surfaceTensionStrength > 0.0001 && this.tensionW[i] > 0.0001) {
         const avgX = this.tensionX[i] / this.tensionW[i];
@@ -1699,7 +1737,8 @@ class CapsuleFerrofluid {
       const isolatedParticle = clamp((2 - neighborCount) / 2, 0, 1);
       const microStabilize = smallParticle * isolatedParticle;
       if (microStabilize > 0.001) {
-        const rejoinGain = this.scale * (0.04 + pulseDriveShaped * 0.035) * microStabilize;
+        const rejoinGain =
+          this.scale * (0.04 + pulseDriveShaped * 0.035) * microStabilize * (0.5 + blobCohesion * 0.5);
         ax += (comX - this.px[i]) * rejoinGain;
         ay += (comY - this.py[i]) * rejoinGain;
       }
@@ -1719,7 +1758,7 @@ class CapsuleFerrofluid {
       this.vx[i] *= resistanceDamping;
       this.vy[i] *= resistanceDamping;
       if (microStabilize > 0.001) {
-        const microDrag = 1 - clamp(0.12 * microStabilize * dt * 60, 0, 0.36);
+        const microDrag = 1 - clamp(0.12 * microStabilize * (0.7 + blobCohesion * 0.3) * dt * 60, 0, 0.44);
         this.vx[i] *= microDrag;
         this.vy[i] *= microDrag;
       }
