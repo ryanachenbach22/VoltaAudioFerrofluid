@@ -85,6 +85,8 @@ class CapsuleFerrofluid {
       fluidColorHex: "#0062ff",
       fluidTint: 0.22,
       reflectivity: 1.36,
+      surfaceSharpness: 1.35,
+      depthBoost: 1.3,
       reflectionClarity: 1.35,
       impactHighlights: 1.3,
       flakeAmount: 0.18,
@@ -772,6 +774,8 @@ class CapsuleFerrofluid {
       "exposure",
       "fluidTint",
       "reflectivity",
+      "surfaceSharpness",
+      "depthBoost",
       "reflectionClarity",
       "impactHighlights",
       "flakeAmount",
@@ -811,6 +815,8 @@ class CapsuleFerrofluid {
           id === "exposure" ||
           id === "fluidTint" ||
           id === "reflectivity" ||
+          id === "surfaceSharpness" ||
+          id === "depthBoost" ||
           id === "reflectionClarity" ||
           id === "impactHighlights" ||
           id === "flakeAmount" ||
@@ -1421,7 +1427,8 @@ class CapsuleFerrofluid {
       this.isolationAlpha[i] += (target - this.isolationAlpha[i]) * clamp(22 * dt, 0, 1);
       this.isolatedParticles[i] = 0;
     }
-    const blobCohesion = clamp(this.params.blobCohesion, 0, 3.0);
+    const blobCohesion = clamp(this.params.blobCohesion, 0, 8.0);
+    const blobCohesionNorm = blobCohesion / 8;
     const detachedFactorFor = (index) => {
       const root = componentRoot[index];
       if (root === mainComponentRoot) {
@@ -1577,7 +1584,7 @@ class CapsuleFerrofluid {
           const ty = nx;
           const swirl = Math.sin(this.time * 24 + i * 0.17);
           const detachedFactor = detachedFactorFor(i);
-          const kickScale = 1 - detachedFactor * 0.58 * (blobCohesion / 3);
+          const kickScale = 1 - detachedFactor * 0.58 * blobCohesionNorm;
           this.vx[i] +=
             (nx * travelKick * ringSign + tx * travelKick * 0.18 * swirl) *
             Math.max(0.22, kickScale);
@@ -1600,7 +1607,7 @@ class CapsuleFerrofluid {
         const ty = nx;
         const swirl = Math.sin(this.time * 27 + i * 0.23);
         const detachedFactor = detachedFactorFor(i);
-        const kickScale = 1 - detachedFactor * 0.58 * (blobCohesion / 3);
+        const kickScale = 1 - detachedFactor * 0.58 * blobCohesionNorm;
         this.vx[i] +=
           (nx * pulseKick * ringSign + tx * pulseKick * 0.22 * swirl) * Math.max(0.22, kickScale);
         this.vy[i] +=
@@ -1629,7 +1636,7 @@ class CapsuleFerrofluid {
         const ty = nx;
         const swirl = (Math.random() - 0.5) * audioSignal.transient * 0.7;
         const detachedFactor = detachedFactorFor(i);
-        const kickScale = 1 - detachedFactor * 0.58 * (blobCohesion / 3);
+        const kickScale = 1 - detachedFactor * 0.58 * blobCohesionNorm;
         this.vx[i] +=
           (nx * transientKick * ringSign + tx * transientKick * swirl) * Math.max(0.22, kickScale);
         this.vy[i] +=
@@ -1662,7 +1669,7 @@ class CapsuleFerrofluid {
       const ringSpring = clamp(Math.abs(ringOffset) / Math.max(1, ringBand * 1.35), 0, 2.8);
       let magnetForce = this.params.magnetStrength * ringSpring * ringFalloff;
       magnetForce *= magnetGate * magnetBoost * audioBoost;
-      magnetForce *= 1 - detachedFactor * 0.42 * (blobCohesion / 3);
+      magnetForce *= 1 - detachedFactor * 0.42 * blobCohesionNorm;
       const dynamicMagnetClamp =
         this.magnetClamp *
         (1 + this.params.pulseAggression * pulseDrive * 0.32) *
@@ -1910,13 +1917,15 @@ class CapsuleFerrofluid {
     const sideLightStrength = clamp(this.params.sideLightStrength, 0, 2.5);
     const envLightStrength = clamp(this.params.envLightStrength, 0, 2.5);
     const reflectivity = clamp(this.params.reflectivity, 0, 2.2);
+    const surfaceSharpness = clamp(this.params.surfaceSharpness, 0.6, 2.6);
+    const depthBoost = clamp(this.params.depthBoost, 0.7, 2.5);
     const reflectionClarity = clamp(this.params.reflectionClarity, 0.5, 2.5);
     const impactHighlights = clamp(this.params.impactHighlights, 0, 2.5);
     const flakeAmount = clamp(this.params.flakeAmount, 0, 1);
     const iridescenceStrength = clamp(this.params.iridescenceStrength, 0, 2.4);
     const motionHighlight = clamp(this.motionHighlight || 0, 0, 2.5);
     const motionSpecGate = smoothstep(0.14, 1.02, motionHighlight);
-    const dynamicTightExponent = 210 + motionSpecGate * 320;
+    const dynamicTightExponent = (210 + motionSpecGate * 320) * (0.8 + surfaceSharpness * 0.45);
     const tintMix = clamp(this.params.fluidTint, 0, 1);
     const fluidR = this.fluidColor[0];
     const fluidG = this.fluidColor[1];
@@ -1987,7 +1996,8 @@ class CapsuleFerrofluid {
 
         const alphaField =
           value * (0.76 + lowQuality * 0.1) + smoothValue * (0.24 - lowQuality * 0.1);
-        const isoWidth = this.isoSoftness + this.edgeFeather;
+        const isoWidth =
+          (this.isoSoftness + this.edgeFeather) / (0.72 + surfaceSharpness * 0.68);
         const alphaBaseSoft = smoothstep(
           this.isoLevel - isoWidth,
           this.isoLevel + isoWidth,
@@ -2029,8 +2039,8 @@ class CapsuleFerrofluid {
           continue;
         }
 
-        let nx = (left - right) * this.normalScale;
-        let ny = (up - down) * this.normalScale;
+        let nx = (left - right) * this.normalScale * (0.75 + surfaceSharpness * 0.75);
+        let ny = (up - down) * this.normalScale * (0.75 + surfaceSharpness * 0.75);
         let nz = 1;
 
         const nLength = Math.hypot(nx, ny, nz) || 1;
@@ -2043,13 +2053,14 @@ class CapsuleFerrofluid {
         const worldX = this.worldXs[x];
         const worldY = this.worldYs[y];
 
-        const fresnel = Math.pow(1 - nz, 2.05);
+        const fresnel = Math.pow(1 - nz, 1.85 + (1 / (0.7 + surfaceSharpness)) * 0.6);
         const surfaceProfile = clamp(
-          smoothstep(0, 1, body) * 0.72 + Math.pow(volumeMask, 0.78) * 0.28,
+          smoothstep(0, 1, body) * (0.62 + depthBoost * 0.2) +
+            Math.pow(volumeMask, 0.72) * (0.22 + depthBoost * 0.08),
           0,
           1,
         );
-        const surfaceZ = (surfaceProfile - 0.42) * this.scale * 0.48;
+        const surfaceZ = (surfaceProfile - 0.38) * this.scale * (0.42 + depthBoost * 0.28);
 
         const ledCenterX = this.capsule.cx;
         const ledCenterY = this.capsule.cy;
@@ -2110,7 +2121,7 @@ class CapsuleFerrofluid {
 
         const pointHalf = Math.max(0, nx * pxh + ny * pyh + nz * pzh);
         const pointSpecular =
-          Math.pow(pointHalf, 96) *
+          Math.pow(pointHalf, 74 + surfaceSharpness * 60) *
           attenuation *
           lightPower *
           ledWrap *
