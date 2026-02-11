@@ -1494,7 +1494,7 @@ class CapsuleFerrofluid {
     const pulseOn = pulseDrive > pulseThreshold ? 1 : 0;
     const aggressionMix = clamp(this.params.pulseAggression / 8, 0, 1);
     const dynamicResistance =
-      this.params.resistance /
+      clamp(this.params.resistance, 0, 2.2) /
       (1 + pulseDriveShaped * (0.9 + this.params.pulseAggression * 0.05));
     const resistanceDamping = Math.exp(-dynamicResistance * 3.2 * dt);
 
