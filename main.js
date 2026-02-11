@@ -54,7 +54,6 @@ class CapsuleFerrofluid {
       magnetStrength: 500,
       magnetSize: 1.0,
       gravity: 52,
-      jitter: 45,
       renderQuality: 1.0,
       cameraOffsetX: 0.08,
       cameraYaw: 10.0,
@@ -102,7 +101,6 @@ class CapsuleFerrofluid {
     this.time = 0;
     this.accumulator = 0;
     this.fixedStep = 1 / 120;
-    this.prevPulseOn = 0;
     this.prevPulseDrive = 0;
     this.pulseState = 1;
     this.pulseEnvelope = 0;
@@ -116,9 +114,6 @@ class CapsuleFerrofluid {
     this.orbitPointerId = -1;
     this.orbitLastX = 0;
     this.orbitLastY = 0;
-    this.magnetOrganicX = 0;
-    this.magnetOrganicY = 0;
-    this.magnetOrganicPhase = Math.random() * TAU;
     this.motionHighlight = 0;
 
     this.pointLightColor = hexToRgb01(this.params.pointLightColorHex);
@@ -674,7 +669,6 @@ class CapsuleFerrofluid {
     if (driveModeInput instanceof HTMLSelectElement) {
       const updateDriveMode = () => {
         this.params.driveMode = driveModeInput.value === "inout" ? "inout" : "gate";
-        this.prevPulseOn = 0;
         this.prevPulseDrive = 0;
       };
       driveModeInput.addEventListener("change", updateDriveMode);
@@ -748,7 +742,6 @@ class CapsuleFerrofluid {
       "magnetStrength",
       "magnetSize",
       "gravity",
-      "jitter",
       "renderQuality",
       "cameraOffsetX",
       "cameraYaw",
@@ -879,7 +872,6 @@ class CapsuleFerrofluid {
         if (control.key === "manualPulse") {
           this.manualPulseHeld = false;
           this.pulseEnvelope = 0;
-          this.prevPulseOn = 0;
           this.prevPulseDrive = 0;
         }
       };
@@ -1487,8 +1479,6 @@ class CapsuleFerrofluid {
     const pulseDrive = clamp(this.pulseEnvelope, 0, 1);
     const pulseDriveShaped = Math.pow(pulseDrive, 1.22);
     const restRelax = 1 - smoothstep(0.08, 0.54, pulseDriveShaped);
-    const pulseThreshold = aggressiveAudio ? (isInOutDrive ? 0.18 : 0.24) : isInOutDrive ? 0.4 : 0.52;
-    const pulseOn = pulseDrive > pulseThreshold ? 1 : 0;
     const aggressionMix = clamp(this.params.pulseAggression / 8, 0, 1);
     const dynamicResistance =
       clamp(this.params.resistance, 0, 2.2) /
@@ -1520,13 +1510,6 @@ class CapsuleFerrofluid {
         : 0.045 + pulseDriveShaped * 0.42;
     const centerPullGain = Math.max(0, centerPullGainRaw * (1 - restRelax * 0.92));
     const centerPullSizeDamp = 1 - magnetSizeNorm * (0.42 + pulseDriveShaped * 0.28);
-    const jitterGain = this.params.manualPulse
-      ? pulseDrive
-      : isInOutDrive
-        ? idleAudio
-          ? 0
-          : 0.08 + pulseDrive * 0.38
-        : 0.2 + pulseDrive * 0.8;
     const restTensionDamp = this.params.manualPulse
       ? 0.18 + pulseDriveShaped * 0.82
       : isInOutDrive
@@ -1540,107 +1523,10 @@ class CapsuleFerrofluid {
       (isInOutDrive ? 0.68 + pulseDriveShaped * 0.62 : 0.96) *
       restTensionDamp;
 
-    const driverTravel = isInOutDrive ? this.scale * 0.022 : 0;
     this.magnetX = this.magnetBaseX;
-    this.magnetY = this.magnetBaseY + (0.5 - pulseDrive) * driverTravel;
-    const organicDrive = clamp(
-      0.16 + pulseDrive * 0.84 + (aggressiveAudio ? audioSignal.transient * 0.52 : 0),
-      0,
-      1.6,
-    );
-    const organicPhase = this.time * (isInOutDrive ? 19 : 13) + this.magnetOrganicPhase;
-    const targetOrganicX =
-      this.scale *
-      (Math.sin(organicPhase * 1.07) * 0.018 + Math.sin(organicPhase * 2.31 + 1.4) * 0.011) *
-      organicDrive;
-    const targetOrganicY =
-      this.scale *
-      (Math.cos(organicPhase * 1.19 + 0.7) * 0.012 + Math.sin(organicPhase * 2.03 + 0.2) * 0.009) *
-      organicDrive;
-    const organicFollow = clamp((isInOutDrive ? 34 : 26) * dt, 0, 1);
-    this.magnetOrganicX += (targetOrganicX - this.magnetOrganicX) * organicFollow;
-    this.magnetOrganicY += (targetOrganicY - this.magnetOrganicY) * organicFollow;
-    this.magnetX += this.magnetOrganicX;
-    this.magnetY += this.magnetOrganicY;
+    this.magnetY = this.magnetBaseY;
     this.pulseState = pulseDrive;
     const pulseDelta = Math.abs(pulseDrive - this.prevPulseDrive);
-
-    if (isInOutDrive && this.params.pulseAggression > 0.01) {
-      const driveDelta = pulseDrive - this.prevPulseDrive;
-      if (driveDelta > 0.0001) {
-        const travelKick = this.scale * this.params.pulseAggression * driveDelta * 0.26;
-        const ringRadiusKick = this.scale * (0.055 + magnetSize * 0.088);
-        for (let i = 0; i < count; i += 1) {
-          const mx = this.magnetX - this.px[i];
-          const my = this.magnetY - this.py[i];
-          const dist = Math.hypot(mx, my) + 0.0001;
-          const ringSign = dist > ringRadiusKick ? 1 : -1;
-          const nx = mx / dist;
-          const ny = my / dist;
-          const tx = -ny;
-          const ty = nx;
-          const swirl = Math.sin(this.time * 24 + i * 0.17);
-          const detachedFactor = detachedFactorFor(i);
-          const kickScale = 1 - detachedFactor * 0.58 * blobCohesionNorm;
-          this.vx[i] +=
-            (nx * travelKick * ringSign + tx * travelKick * 0.18 * swirl) *
-            Math.max(0.22, kickScale);
-          this.vy[i] +=
-            (ny * travelKick * ringSign + ty * travelKick * 0.18 * swirl) *
-            Math.max(0.22, kickScale);
-        }
-      }
-    } else if (pulseOn === 1 && this.prevPulseOn === 0 && this.params.pulseAggression > 0.01) {
-      const pulseKick = this.scale * this.params.pulseAggression * 0.072;
-      const ringRadiusKick = this.scale * (0.055 + magnetSize * 0.088);
-      for (let i = 0; i < count; i += 1) {
-        const mx = this.magnetX - this.px[i];
-        const my = this.magnetY - this.py[i];
-        const dist = Math.hypot(mx, my) + 0.0001;
-        const ringSign = dist > ringRadiusKick ? 1 : -1;
-        const nx = mx / dist;
-        const ny = my / dist;
-        const tx = -ny;
-        const ty = nx;
-        const swirl = Math.sin(this.time * 27 + i * 0.23);
-        const detachedFactor = detachedFactorFor(i);
-        const kickScale = 1 - detachedFactor * 0.58 * blobCohesionNorm;
-        this.vx[i] +=
-          (nx * pulseKick * ringSign + tx * pulseKick * 0.22 * swirl) * Math.max(0.22, kickScale);
-        this.vy[i] +=
-          (ny * pulseKick * ringSign + ty * pulseKick * 0.22 * swirl) * Math.max(0.22, kickScale);
-      }
-    }
-
-    if (
-      this.params.audioReactive &&
-      !this.params.manualPulse &&
-      audioSignal.active &&
-      audioSignal.transient > 0.01
-    ) {
-      const transientKick =
-        this.scale *
-        (0.065 + this.params.pulseAggression * 0.048 + audioSignal.transient * 0.24);
-      const ringRadiusKick = this.scale * (0.055 + magnetSize * 0.088);
-      for (let i = 0; i < count; i += 1) {
-        const mx = this.magnetX - this.px[i];
-        const my = this.magnetY - this.py[i];
-        const dist = Math.hypot(mx, my) + 0.0001;
-        const ringSign = dist > ringRadiusKick ? 1 : -1;
-        const nx = mx / dist;
-        const ny = my / dist;
-        const tx = -ny;
-        const ty = nx;
-        const swirl = (Math.random() - 0.5) * audioSignal.transient * 0.7;
-        const detachedFactor = detachedFactorFor(i);
-        const kickScale = 1 - detachedFactor * 0.58 * blobCohesionNorm;
-        this.vx[i] +=
-          (nx * transientKick * ringSign + tx * transientKick * swirl) * Math.max(0.22, kickScale);
-        this.vy[i] +=
-          (ny * transientKick * ringSign + ty * transientKick * swirl) * Math.max(0.22, kickScale);
-      }
-    }
-    this.prevPulseOn = pulseOn;
     this.prevPulseDrive = pulseDrive;
 
     let speedAccum = 0;
@@ -1751,14 +1637,6 @@ class CapsuleFerrofluid {
       }
 
       ay += this.params.gravity * 1.8;
-
-      ax += (Math.random() - 0.5) * this.params.jitter * jitterGain;
-      ay += (Math.random() - 0.5) * this.params.jitter * 0.72 * jitterGain;
-      if (this.params.manualPulse && !this.manualPulseHeld) {
-        const idleDrift = this.scale * 0.0042;
-        ax += Math.sin(this.time * 0.93 + i * 1.73) * idleDrift;
-        ay += Math.cos(this.time * 1.11 - i * 1.37) * idleDrift * 0.82;
-      }
 
       this.vx[i] += ax * dt;
       this.vy[i] += ay * dt;
