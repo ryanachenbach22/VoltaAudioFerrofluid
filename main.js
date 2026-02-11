@@ -1691,6 +1691,19 @@ class CapsuleFerrofluid {
         ay += (comY - this.py[i]) * compactionGain;
       }
 
+      // Micro-droplet stabilization: only affects small, isolated particles.
+      // This keeps edge fragments from jittering/pop-in without reintroducing
+      // the old detached-droplet render path.
+      const neighborCount = this.neighborCounts[i];
+      const smallParticle = clamp((0.82 - this.pw[i]) / 0.42, 0, 1);
+      const isolatedParticle = clamp((2 - neighborCount) / 2, 0, 1);
+      const microStabilize = smallParticle * isolatedParticle;
+      if (microStabilize > 0.001) {
+        const rejoinGain = this.scale * (0.04 + pulseDriveShaped * 0.035) * microStabilize;
+        ax += (comX - this.px[i]) * rejoinGain;
+        ay += (comY - this.py[i]) * rejoinGain;
+      }
+
       ay += this.params.gravity * 1.8;
 
       ax += (Math.random() - 0.5) * this.params.jitter * jitterGain;
@@ -1705,6 +1718,11 @@ class CapsuleFerrofluid {
       this.vy[i] += ay * dt;
       this.vx[i] *= resistanceDamping;
       this.vy[i] *= resistanceDamping;
+      if (microStabilize > 0.001) {
+        const microDrag = 1 - clamp(0.12 * microStabilize * dt * 60, 0, 0.36);
+        this.vx[i] *= microDrag;
+        this.vy[i] *= microDrag;
+      }
 
       let speed = Math.hypot(this.vx[i], this.vy[i]);
       if (speed > this.maxSpeed) {
