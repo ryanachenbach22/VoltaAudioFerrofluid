@@ -1412,13 +1412,11 @@ class CapsuleFerrofluid {
 
     for (let i = 0; i < count; i += 1) {
       const root = componentRoot[i];
-      const detachedClusterSize = componentSize[root];
-      // Detachment by connected components prevents edge particles from flickering
-      // into detached mode when they are still part of the main blob.
-      const target = root !== mainComponentRoot && detachedClusterSize >= 2 ? 1 : 0;
-      const rate = target === 1 ? 4.8 : 22.0;
-      this.isolationAlpha[i] += (target - this.isolationAlpha[i]) * clamp(rate * dt, 0, 1);
-      this.isolatedParticles[i] = this.isolationAlpha[i] > 0.8 ? 1 : 0;
+      void root;
+      // Keep detached-droplet rendering disabled to avoid halo/ghosting artifacts.
+      const target = 0;
+      this.isolationAlpha[i] += (target - this.isolationAlpha[i]) * clamp(22 * dt, 0, 1);
+      this.isolatedParticles[i] = 0;
     }
 
     const audioSignal = this.sampleAudioSignal(dt);
@@ -1946,7 +1944,7 @@ class CapsuleFerrofluid {
         const alphaBase = alphaBaseSoft * 0.34 + alphaBaseTight * 0.66;
         const alphaMain = Math.pow(alphaBase, 1.24 - lowQuality * 0.2);
         // Isolated-droplet pass only: detached particles can appear without edge circle artifacts.
-        const isolatedSeed = smoothstep(0.92, 1.52, isolatedValue);
+        const isolatedSeed = 0;
         const nearMain = smoothstep(this.isoLevel - 0.68, this.isoLevel + 0.34, alphaField);
         const alphaDroplet = isolatedSeed * (1 - nearMain) * 0.16;
         const dropletBlend = clamp(alphaDroplet / Math.max(0.0001, alphaMain + alphaDroplet), 0, 1);
