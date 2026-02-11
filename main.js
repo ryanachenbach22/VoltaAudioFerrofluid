@@ -2053,17 +2053,22 @@ class CapsuleFerrofluid {
         ny /= nLength;
         nz /= nLength;
 
-        const body = clamp((smoothValue - this.isoLevel) * 0.56, 0, 1);
+        const heightRaw = smoothValue - this.isoLevel;
+        const body = clamp(heightRaw * 0.56, 0, 1);
         const volumeMask = smoothstep(this.isoLevel - 0.08, this.isoLevel + 1.35, smoothValue);
         const worldX = this.worldXs[x];
         const worldY = this.worldYs[y];
 
         const fresnel = Math.pow(1 - nz, 1.85 + (1 / (0.7 + surfaceSharpness)) * 0.6);
+        // Preserve depth variation at high peaks; hard-clamping here made tall
+        // regions look plateaued/flat near the driver.
+        const peakLift = Math.log1p(Math.max(0, heightRaw) * 0.95) * 0.34 * depthBoost;
         const surfaceProfile = clamp(
-          smoothstep(0, 1, body) * (0.62 + depthBoost * 0.2) +
-            Math.pow(volumeMask, 0.72) * (0.22 + depthBoost * 0.08),
+          smoothstep(0, 1, body) * (0.6 + depthBoost * 0.18) +
+            Math.pow(volumeMask, 0.72) * (0.2 + depthBoost * 0.08) +
+            peakLift,
           0,
-          1,
+          2.0,
         );
         const surfaceZ = (surfaceProfile - 0.38) * this.scale * (0.42 + depthBoost * 0.28);
 
