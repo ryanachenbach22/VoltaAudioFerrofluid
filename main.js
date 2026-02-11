@@ -51,7 +51,7 @@ class CapsuleFerrofluid {
 
     this.params = {
       particleCount: 90,
-      magnetStrength: 500,
+      magnetStrength: 900,
       magnetSize: 1.0,
       gravity: 52,
       renderQuality: 1.0,
@@ -85,7 +85,7 @@ class CapsuleFerrofluid {
       impactHighlights: 1.3,
       iridescenceStrength: 0.0,
       audioReactive: false,
-      driveMode: "inout",
+      driveMode: "gate",
       audioSensitivity: 1.37,
       audioSmoothing: 0.72,
       audioThreshold: 0.51,
@@ -1103,7 +1103,7 @@ class CapsuleFerrofluid {
     this.isolationLinkRadius = this.neighborRadius * 0.72;
     this.repulsionRadius = this.scale * 0.05;
     this.magnetRangeBase = this.scale * 0.5;
-    this.magnetClamp = 1800;
+    this.magnetClamp = 4200;
     this.maxSpeed = this.scale * 6.2;
 
     this.isoLevel = 1.68;
@@ -1479,24 +1479,16 @@ class CapsuleFerrofluid {
     const pulseDrive = clamp(this.pulseEnvelope, 0, 1);
     const pulseDriveShaped = Math.pow(pulseDrive, 1.22);
     const restRelax = 1 - smoothstep(0.08, 0.54, pulseDriveShaped);
-    const aggressionMix = clamp(this.params.pulseAggression / 8, 0, 1);
     const dynamicResistance =
       clamp(this.params.resistance, 0, 2.2) /
-      (1 + pulseDriveShaped * (0.9 + this.params.pulseAggression * 0.05));
-    const resistanceDamping = Math.exp(-dynamicResistance * 3.2 * dt);
+      (1 + pulseDriveShaped * (1.5 + this.params.pulseAggression * 0.1));
+    const resistanceDamping = Math.exp(-dynamicResistance * 2.15 * dt);
 
     const idleAudio = this.params.audioReactive && !audioSignal.active && !this.params.manualPulse;
-    const baselineMagnet = this.params.manualPulse
-      ? 0
-      : isInOutDrive
-        ? 0
-        : idleAudio
-          ? 0
-          : (1 - aggressionMix) * 0.24;
+    const baselineMagnet = 0;
     const magnetGate = baselineMagnet + (1 - baselineMagnet) * pulseDriveShaped;
-    const magnetBoost = isInOutDrive
-      ? 0.72 + pulseDriveShaped * (0.95 + this.params.pulseAggression * 0.2)
-      : 1 + this.params.pulseAggression * (0.55 + pulseDriveShaped * 1.05) * pulseDriveShaped;
+    const magnetBoost =
+      1 + this.params.pulseAggression * (0.62 + pulseDriveShaped * 1.15) * pulseDriveShaped;
     const audioBoost =
       aggressiveAudio && !this.params.manualPulse
         ? 1.28 + audioSignal.drive * 1.52 + audioSignal.impact * 0.72
