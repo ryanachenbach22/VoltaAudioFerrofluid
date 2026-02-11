@@ -66,7 +66,7 @@ class CapsuleFerrofluid {
       viscosity: 0.05,
       resistance: 0.94,
       surfaceTension: 2.5,
-      blobCohesion: 1.35,
+      blobCohesion: 0.95,
       pointLightColorHex: "#ff0000",
       useHdriReflections: true,
       pointLightIntensity: 1.0,
@@ -1423,6 +1423,9 @@ class CapsuleFerrofluid {
     }
     const blobCohesion = clamp(this.params.blobCohesion, 0, 8.0);
     const blobCohesionNorm = blobCohesion / 8;
+    const cohesionRejoinScale = 0.4 + blobCohesionNorm * 2.8;
+    const cohesionMicroScale = 0.52 + blobCohesionNorm * 0.78;
+    const cohesionMicroDragScale = 0.75 + blobCohesionNorm * 0.45;
     const detachedFactorFor = (index) => {
       const root = componentRoot[index];
       if (root === mainComponentRoot) {
@@ -1695,9 +1698,9 @@ class CapsuleFerrofluid {
       if (detachedFactor > 0.001) {
         const rejoinGain =
           this.scale *
-          (0.045 + pulseDriveShaped * 0.06) *
+          (0.03 + pulseDriveShaped * 0.05) *
           detachedFactor *
-          blobCohesion;
+          cohesionRejoinScale;
         ax += (comX - this.px[i]) * rejoinGain;
         ay += (comY - this.py[i]) * rejoinGain;
       }
@@ -1739,7 +1742,10 @@ class CapsuleFerrofluid {
       const microStabilize = smallParticle * isolatedParticle;
       if (microStabilize > 0.001) {
         const rejoinGain =
-          this.scale * (0.04 + pulseDriveShaped * 0.035) * microStabilize * (0.5 + blobCohesion * 0.5);
+          this.scale *
+          (0.026 + pulseDriveShaped * 0.022) *
+          microStabilize *
+          cohesionMicroScale;
         ax += (comX - this.px[i]) * rejoinGain;
         ay += (comY - this.py[i]) * rejoinGain;
       }
@@ -1759,7 +1765,7 @@ class CapsuleFerrofluid {
       this.vx[i] *= resistanceDamping;
       this.vy[i] *= resistanceDamping;
       if (microStabilize > 0.001) {
-        const microDrag = 1 - clamp(0.12 * microStabilize * (0.7 + blobCohesion * 0.3) * dt * 60, 0, 0.44);
+        const microDrag = 1 - clamp(0.095 * microStabilize * cohesionMicroDragScale * dt * 60, 0, 0.34);
         this.vx[i] *= microDrag;
         this.vy[i] *= microDrag;
       }
