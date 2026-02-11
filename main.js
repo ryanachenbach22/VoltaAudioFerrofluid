@@ -2114,12 +2114,17 @@ class CapsuleFerrofluid {
         const lz = lightZ / lightLen;
 
         const attenuation = 1 / (1 + (lightLen * lightLen) / (this.scale * this.scale * 1.45));
+        const sideFlattenMask =
+          smoothstep(0.58, 1.28, heightRaw) *
+          smoothstep(0.45, 0.98, volumeMask);
+        const sideDiffuseDamp = 1 - sideFlattenMask * clamp(sideLightStrength * 0.38 + lightPower * 0.22, 0, 0.82);
         const pointDiffuse =
           Math.max(0, nx * lx + ny * ly + nz * lz) *
           attenuation *
           lightPower *
           ledWrap *
-          sideLightStrength;
+          sideLightStrength *
+          sideDiffuseDamp;
 
         const hx = lx;
         const hy = ly;
@@ -2160,7 +2165,8 @@ class CapsuleFerrofluid {
           bounceAttenuation *
           lightPower *
           (0.18 + ledWrap * 0.34) *
-          sideLightStrength;
+          sideLightStrength *
+          sideDiffuseDamp;
         const bhx = blx;
         const bhy = bly;
         const bhz = blz + 1;
@@ -2236,8 +2242,10 @@ class CapsuleFerrofluid {
         if (ledEnvStrength > 0.001) {
           const ledDiffuseSample = this.sampleLedRingDirection(nx, ny, nz, ledEnvStrength);
           const ledMirrorSample = this.sampleLedRingDirection(rx, ry, rz, ledEnvStrength * 1.18);
-          const ledDiffuseMix = clamp(0.18 + ledEnvStrength * 0.26, 0.04, 0.9);
-          const ledMirrorMix = clamp(0.26 + ledEnvStrength * 0.34, 0.06, 0.96);
+          const ledDiffuseMix =
+            clamp(0.18 + ledEnvStrength * 0.26, 0.04, 0.9) * (1 - sideFlattenMask * 0.75);
+          const ledMirrorMix =
+            clamp(0.26 + ledEnvStrength * 0.34, 0.06, 0.96) * (0.72 + (1 - sideFlattenMask) * 0.28);
           envDiffuseColorR = envDiffuseColorR * (1 - ledDiffuseMix) + ledDiffuseSample[0] * ledDiffuseMix;
           envDiffuseColorG = envDiffuseColorG * (1 - ledDiffuseMix) + ledDiffuseSample[1] * ledDiffuseMix;
           envDiffuseColorB = envDiffuseColorB * (1 - ledDiffuseMix) + ledDiffuseSample[2] * ledDiffuseMix;
@@ -2772,12 +2780,13 @@ class CapsuleFerrofluid {
     );
 
     const qualityGlowScale = 0.62 + renderQualityNorm * 0.38;
+    const sideWashDamp = 1 / (1 + sideLightStrength * ledIntensity * 0.9);
     const fluidCoreAlpha = clamp(
-      0.07 * ledIntensity * qualityGlowScale * sideLightStrength * (1 - lowQuality * 0.2),
+      0.05 * ledIntensity * qualityGlowScale * sideLightStrength * sideWashDamp * (1 - lowQuality * 0.2),
       0,
-      0.2,
+      0.14,
     );
-    const fluidMidAlpha = clamp(0.024 * ledIntensity * qualityGlowScale * sideLightStrength, 0, 0.08);
+    const fluidMidAlpha = clamp(0.018 * ledIntensity * qualityGlowScale * sideLightStrength * sideWashDamp, 0, 0.06);
     const ringInnerWidth = Math.max(2, this.scale * 0.018);
     const ringOuterWidth = Math.max(5, this.scale * 0.042);
     const ringOuterAlpha = clamp(fluidMidAlpha * 1.25, 0, 0.18);
