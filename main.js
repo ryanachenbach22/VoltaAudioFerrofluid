@@ -91,7 +91,6 @@ class CapsuleFerrofluid {
       audioSmoothing: 0.72,
       audioThreshold: 0.51,
       manualPulse: true,
-      showSpeaker: false,
       viewMagnet: false,
       cohesion: 76,
       repulsion: 168,
@@ -862,7 +861,6 @@ class CapsuleFerrofluid {
     }
 
     const checkboxControls = [
-      { id: "showSpeaker", key: "showSpeaker" },
       { id: "viewMagnet", key: "viewMagnet" },
       { id: "manualPulse", key: "manualPulse" },
       { id: "audioReactive", key: "audioReactive" },
