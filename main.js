@@ -1804,13 +1804,15 @@ class CapsuleFerrofluid {
   constrainToCapsule(index) {
     const padding = this.scale * 0.03;
     const rx = Math.max(10, this.capsule.rx - padding);
-    const ry = Math.max(10, this.capsule.ry - padding);
+    const ryBottom = Math.max(10, this.capsule.ry - padding);
+    const ryTop = Math.max(10, this.capsule.ry - (padding + this.scale * 0.1));
 
     const lx = this.px[index] - this.capsule.cx;
     const ly = this.py[index] - this.capsule.cy;
+    const ryCurrent = ly < 0 ? ryTop : ryBottom;
 
     const nx = lx / rx;
-    const ny = ly / ry;
+    const ny = ly / ryCurrent;
     const value = nx * nx + ny * ny;
 
     if (value <= 1) {
@@ -1819,10 +1821,10 @@ class CapsuleFerrofluid {
 
     const inv = 1 / Math.sqrt(value);
     this.px[index] = this.capsule.cx + nx * inv * rx;
-    this.py[index] = this.capsule.cy + ny * inv * ry;
+    this.py[index] = this.capsule.cy + ny * inv * ryCurrent;
 
     const gx = (this.px[index] - this.capsule.cx) / (rx * rx);
-    const gy = (this.py[index] - this.capsule.cy) / (ry * ry);
+    const gy = (this.py[index] - this.capsule.cy) / (ryCurrent * ryCurrent);
     const gl = Math.hypot(gx, gy) || 1;
 
     const normalX = gx / gl;
