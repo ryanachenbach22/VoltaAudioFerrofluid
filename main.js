@@ -44,11 +44,6 @@ const toneMapACES = (value, exposure = 1) => {
   return clamp(mapped * 255, 0, 255);
 };
 
-const hash2 = (x, y) => {
-  const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
-  return s - Math.floor(s);
-};
-
 class CapsuleFerrofluid {
   constructor(canvas) {
     this.canvas = canvas;
@@ -89,7 +84,6 @@ class CapsuleFerrofluid {
       depthBoost: 1.3,
       reflectionClarity: 1.35,
       impactHighlights: 1.3,
-      flakeAmount: 0.18,
       iridescenceStrength: 0.0,
       audioReactive: false,
       driveMode: "inout",
@@ -310,7 +304,8 @@ class CapsuleFerrofluid {
     const angle = Math.atan2(y, x);
     const u = ((angle / TAU) % 1 + 1) % 1;
     const segment = Math.floor(u * 72);
-    const segmentJitter = 0.78 + hash2(segment, 17) * 0.46;
+    const segmentNoise = Math.sin(segment * 127.1 + 17 * 311.7) * 43758.5453123;
+    const segmentJitter = 0.78 + (segmentNoise - Math.floor(segmentNoise)) * 0.46;
 
     const ringIntensity =
       sideBand * (0.14 + primary * 1.04 + opposite * 0.42) * segmentJitter * clamp(strength, 0, 2.5);
@@ -778,7 +773,6 @@ class CapsuleFerrofluid {
       "depthBoost",
       "reflectionClarity",
       "impactHighlights",
-      "flakeAmount",
       "iridescenceStrength",
       "audioSensitivity",
       "audioSmoothing",
@@ -819,7 +813,6 @@ class CapsuleFerrofluid {
           id === "depthBoost" ||
           id === "reflectionClarity" ||
           id === "impactHighlights" ||
-          id === "flakeAmount" ||
           id === "iridescenceStrength" ||
           id === "audioSensitivity" ||
           id === "audioSmoothing" ||
@@ -1926,7 +1919,6 @@ class CapsuleFerrofluid {
     const depthBoost = clamp(this.params.depthBoost, 0.7, 2.5);
     const reflectionClarity = clamp(this.params.reflectionClarity, 0.5, 2.5);
     const impactHighlights = clamp(this.params.impactHighlights, 0, 2.5);
-    const flakeAmount = clamp(this.params.flakeAmount, 0, 1);
     const iridescenceStrength = clamp(this.params.iridescenceStrength, 0, 2.4);
     const motionHighlight = clamp(this.motionHighlight || 0, 0, 2.5);
     const motionSpecGate = smoothstep(0.14, 1.02, motionHighlight);
@@ -2378,25 +2370,6 @@ class CapsuleFerrofluid {
           specEdgeMask *
           detachedSpecDamp *
           iridescenceStrength;
-        const flakeScale = Math.max(1, this.scale * 0.014);
-        const flakeCoordX = worldX / flakeScale;
-        const flakeCoordY = worldY / flakeScale;
-        const flakeNoiseA = hash2(flakeCoordX + this.time * 0.11, flakeCoordY - this.time * 0.07);
-        const flakeNoiseB = hash2(
-          flakeCoordX * 1.87 - this.time * 0.05,
-          flakeCoordY * 1.61 + this.time * 0.09,
-        );
-        const flakeMask = Math.pow(clamp(flakeNoiseA * 0.62 + flakeNoiseB * 0.38, 0, 1), 16);
-        const flakeVisibility =
-          flakeAmount *
-          specEdgeMask *
-          detachedSpecDamp *
-          (0.08 + pointSpecular * 2.4 + pointSpecularTight * 3.8 + fresnel * 0.35);
-        const flakeEnergy = flakeMask * flakeVisibility * (70 + lightPower * 90 + reflectivity * 65);
-        const flakeHue = hash2(flakeCoordX * 2.13 + 5.2, flakeCoordY * 2.41 - 1.4);
-        const flakeIriR = 0.5 + 0.5 * Math.cos(TAU * (flakeHue + 0.0));
-        const flakeIriG = 0.5 + 0.5 * Math.cos(TAU * (flakeHue + 0.33));
-        const flakeIriB = 0.5 + 0.5 * Math.cos(TAU * (flakeHue + 0.66));
         const neutralBaseR = tone * 0.038;
         const neutralBaseG = tone * 0.043;
         const neutralBaseB = tone * 0.048;
@@ -2486,12 +2459,6 @@ class CapsuleFerrofluid {
           coloredHotspot * pointTintB +
           iridescence * iridescenceB +
           impactFlash * 1.03;
-        const flakeTintR = 0.72 + pointTintR * 0.28 + flakeIriR * iridescenceStrength * 0.22;
-        const flakeTintG = 0.72 + pointTintG * 0.28 + flakeIriG * iridescenceStrength * 0.22;
-        const flakeTintB = 0.74 + pointTintB * 0.26 + flakeIriB * iridescenceStrength * 0.24;
-        red += flakeEnergy * flakeTintR;
-        green += flakeEnergy * flakeTintG;
-        blue += flakeEnergy * flakeTintB;
 
         const exposure = clamp(this.params.exposure, 0.6, 1.8);
         red = toneMapACES(red, exposure);
