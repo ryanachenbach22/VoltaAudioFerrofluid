@@ -2710,93 +2710,7 @@ class CapsuleFerrofluid {
     this.ctx.fillStyle = interiorFill;
     this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
 
-    // Full interior wall lighting so the white backing plate responds to the LED ring.
-    const wallLightGain = clamp(sideLightStrength * (0.42 + ledIntensity * 0.66), 0, 3.2);
-    const wallLedX = cx + fluidOffsetX + ledDirX * rx * 0.94;
-    const wallLedY = cy + fluidOffsetY + ledDirY * ry * 0.94;
-    const wallBounceX = cx + fluidOffsetX - ledDirX * rx * 0.76;
-    const wallBounceY = cy + fluidOffsetY - ledDirY * ry * 0.76;
-    const wallHotspot = this.ctx.createRadialGradient(
-      wallLedX,
-      wallLedY,
-      this.scale * 0.01,
-      wallLedX,
-      wallLedY,
-      Math.max(rx, ry) * 1.38,
-    );
-    wallHotspot.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, ${clamp(0.34 * wallLightGain, 0, 0.7)})`);
-    wallHotspot.addColorStop(0.3, `rgba(${lr}, ${lg}, ${lb}, ${clamp(0.14 * wallLightGain, 0, 0.4)})`);
-    wallHotspot.addColorStop(1, "rgba(0, 0, 0, 0)");
-    this.ctx.save();
-    this.ctx.globalCompositeOperation = "screen";
-    this.ctx.filter = `blur(${Math.max(1.2, this.scale * 0.013)}px)`;
-    this.ctx.fillStyle = wallHotspot;
-    this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
-    this.ctx.restore();
-
-    const wallBounce = this.ctx.createRadialGradient(
-      wallBounceX,
-      wallBounceY,
-      this.scale * 0.06,
-      wallBounceX,
-      wallBounceY,
-      Math.max(rx, ry) * 1.22,
-    );
-    wallBounce.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, ${clamp(0.09 * wallLightGain, 0, 0.24)})`);
-    wallBounce.addColorStop(0.45, `rgba(${lr}, ${lg}, ${lb}, ${clamp(0.032 * wallLightGain, 0, 0.12)})`);
-    wallBounce.addColorStop(1, "rgba(0, 0, 0, 0)");
-    this.ctx.save();
-    this.ctx.globalCompositeOperation = "screen";
-    this.ctx.filter = `blur(${Math.max(1.4, this.scale * 0.016)}px)`;
-    this.ctx.fillStyle = wallBounce;
-    this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
-    this.ctx.restore();
-
-    const wallFalloff = this.ctx.createLinearGradient(
-      cx + fluidOffsetX + ledDirX * rx * 1.12,
-      cy + fluidOffsetY + ledDirY * ry * 1.12,
-      cx + fluidOffsetX - ledDirX * rx * 1.16,
-      cy + fluidOffsetY - ledDirY * ry * 1.16,
-    );
-    wallFalloff.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, ${clamp(0.08 * wallLightGain, 0, 0.2)})`);
-    wallFalloff.addColorStop(0.45, "rgba(0, 0, 0, 0)");
-    wallFalloff.addColorStop(1, `rgba(0, 0, 0, ${clamp(0.1 + wallLightGain * 0.07, 0.1, 0.32)})`);
-    this.ctx.save();
-    this.ctx.globalCompositeOperation = "soft-light";
-    this.ctx.fillStyle = wallFalloff;
-    this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
-    this.ctx.restore();
-
-    this.ctx.save();
-    this.ctx.globalCompositeOperation = "multiply";
-    this.ctx.globalAlpha = clamp(0.32 + wallLightGain * 0.1, 0.25, 0.52);
-    this.ctx.fillStyle = wallFalloff;
-    this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
-    this.ctx.restore();
-
-    // LED ring bounce on the capsule walls (interior shell), separated from fluid shading.
-    const wallLight = this.ctx.createLinearGradient(
-      ledCenterX + ledDirX * rx * 0.75,
-      ledCenterY + ledDirY * ry * 0.75,
-      ledCenterX - ledDirX * rx * 1.05,
-      ledCenterY - ledDirY * ry * 1.05,
-    );
-    const wallCoreAlpha = clamp(0.09 * sideLightStrength, 0, 0.28);
-    const wallMidAlpha = clamp(0.045 * sideLightStrength, 0, 0.18);
-    const wallFarAlpha = clamp(0.012 * sideLightStrength, 0, 0.08);
-    wallLight.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, ${wallCoreAlpha})`);
-    wallLight.addColorStop(0.4, `rgba(${lr}, ${lg}, ${lb}, ${wallMidAlpha})`);
-    wallLight.addColorStop(1, `rgba(${lr}, ${lg}, ${lb}, ${wallFarAlpha})`);
-
-    this.ctx.save();
-    this.ctx.globalCompositeOperation = "screen";
-    this.ctx.filter = `blur(${Math.max(1.5, this.scale * 0.014)}px)`;
-    this.ctx.strokeStyle = wallLight;
-    this.ctx.lineWidth = Math.max(4, this.scale * 0.12);
-    this.ctx.beginPath();
-    this.ctx.ellipse(cx + fluidOffsetX, cy + fluidOffsetY, rx * 0.95, ry * 0.95, 0, 0, TAU);
-    this.ctx.stroke();
-    this.ctx.restore();
+    // Capsule-wall LED lighting disabled (temporary) to avoid wall artifacts.
 
     if (this.fluidShadowCtx) {
       const shadowWidth = this.fluidShadowCanvas.width;
@@ -2838,25 +2752,7 @@ class CapsuleFerrofluid {
         this.ctx.restore();
       }
 
-      // LED occlusion shadow from fluid onto capsule walls.
-      const wallShadowDx = -ledDirX * this.scale * 0.14;
-      const wallShadowDy = -ledDirY * this.scale * 0.14;
-      this.ctx.save();
-      this.ctx.beginPath();
-      this.ctx.ellipse(cx + fluidOffsetX, cy + fluidOffsetY, rx * 0.99, ry * 0.99, 0, 0, TAU);
-      this.ctx.ellipse(cx + fluidOffsetX, cy + fluidOffsetY, rx * 0.8, ry * 0.8, 0, 0, TAU);
-      this.ctx.clip("evenodd");
-      this.ctx.globalCompositeOperation = "multiply";
-      this.ctx.globalAlpha = clamp(0.26 * sideLightStrength, 0.08, 0.42);
-      this.ctx.filter = `blur(${Math.max(1.8, this.scale * 0.02)}px)`;
-      this.ctx.drawImage(
-        this.fluidShadowCanvas,
-        this.fieldBounds.x + fluidOffsetX + wallShadowDx,
-        this.fieldBounds.y + fluidOffsetY + wallShadowDy,
-        this.fieldBounds.w,
-        this.fieldBounds.h,
-      );
-      this.ctx.restore();
+      // Capsule-wall LED occlusion disabled (temporary) to avoid wall artifacts.
     }
 
     this.ctx.drawImage(
