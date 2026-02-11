@@ -1134,11 +1134,14 @@ class CapsuleFerrofluid {
     this.influenceRadiusSq = this.influenceRadius * this.influenceRadius;
     this.fieldGridCellSize = Math.max(1, this.influenceRadius);
 
+    // Add margin so the scalar field is never clipped right at capsule bounds.
+    // This avoids flat/rectangular artifacts when fluid settles near edges.
+    const fieldPadding = this.influenceRadius * 1.35;
     this.fieldBounds = {
-      x: this.capsule.cx - this.capsule.rx,
-      y: this.capsule.cy - this.capsule.ry,
-      w: this.capsule.rx * 2,
-      h: this.capsule.ry * 2,
+      x: this.capsule.cx - this.capsule.rx - fieldPadding,
+      y: this.capsule.cy - this.capsule.ry - fieldPadding,
+      w: this.capsule.rx * 2 + fieldPadding * 2,
+      h: this.capsule.ry * 2 + fieldPadding * 2,
     };
     this.fieldGridCols = Math.max(1, Math.ceil(this.fieldBounds.w / this.fieldGridCellSize));
     this.fieldGridRows = Math.max(1, Math.ceil(this.fieldBounds.h / this.fieldGridCellSize));
