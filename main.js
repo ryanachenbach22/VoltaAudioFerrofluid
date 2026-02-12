@@ -188,7 +188,13 @@ class CapsuleFerrofluid {
       bins: null,
       mode: "none",
       level: 0,
+      lowLevel: 0,
+      prevLow: 0,
       impact: 0,
+      driveWeights: null,
+      lowWeights: null,
+      driveWeightSum: 1,
+      lowWeightSum: 1,
       mediaEl: new Audio(),
       mediaSource: null,
       micSource: null,
@@ -200,6 +206,59 @@ class CapsuleFerrofluid {
 
     this.audio.mediaEl.loop = true;
     this.audio.mediaEl.preload = "auto";
+  }
+
+  resetAudioDynamics() {
+    this.audio.level = 0;
+    this.audio.lowLevel = 0;
+    this.audio.prevLow = 0;
+    this.audio.impact = 0;
+  }
+
+  buildAudioWeights() {
+    if (!this.audio.context || !this.audio.bins) {
+      return;
+    }
+
+    const binCount = this.audio.bins.length;
+    const nyquist = this.audio.context.sampleRate * 0.5;
+    const binHz = nyquist / Math.max(1, binCount);
+    const driveWeights = new Float32Array(binCount);
+    const lowWeights = new Float32Array(binCount);
+    let driveWeightSum = 0;
+    let lowWeightSum = 0;
+
+    for (let i = 0; i < binCount; i += 1) {
+      const freq = (i + 0.5) * binHz;
+      if (freq < 20 || freq > 6000) {
+        continue;
+      }
+
+      // Approximate a voltage-driven coil current profile:
+      // inductance and resonance raise impedance, reducing current.
+      const inductiveImpedance = Math.sqrt(1 + Math.pow(freq / 1400, 2));
+      const resonanceImpedance = 1 + 1.15 * Math.exp(-Math.pow((freq - 90) / 55, 2));
+      const currentWeight = 1 / (inductiveImpedance * resonanceImpedance);
+
+      const lowBand = smoothstep(28, 58, freq) * (1 - smoothstep(210, 320, freq));
+      const kickBand = smoothstep(45, 70, freq) * (1 - smoothstep(130, 180, freq));
+      const midBand = smoothstep(180, 280, freq) * (1 - smoothstep(1100, 1600, freq));
+      const highBand = smoothstep(1200, 1800, freq) * (1 - smoothstep(4200, 6000, freq));
+
+      const driveW =
+        currentWeight * (lowBand * 1.25 + kickBand * 0.85 + midBand * 0.22 + highBand * 0.06);
+      const lowW = currentWeight * (kickBand * 1.35 + lowBand * 0.95);
+
+      driveWeights[i] = driveW;
+      lowWeights[i] = lowW;
+      driveWeightSum += driveW;
+      lowWeightSum += lowW;
+    }
+
+    this.audio.driveWeights = driveWeights;
+    this.audio.lowWeights = lowWeights;
+    this.audio.driveWeightSum = Math.max(0.0001, driveWeightSum);
+    this.audio.lowWeightSum = Math.max(0.0001, lowWeightSum);
   }
 
   setHdriStatus(message) {
@@ -364,6 +423,7 @@ class CapsuleFerrofluid {
       this.audio.analyser.fftSize = 1024;
       this.audio.analyser.smoothingTimeConstant = 0;
       this.audio.bins = new Uint8Array(this.audio.analyser.frequencyBinCount);
+      this.buildAudioWeights();
     }
 
     if (this.audio.context.state === "suspended") {
@@ -446,8 +506,7 @@ class CapsuleFerrofluid {
     this.audio.mediaSource.connect(this.audio.analyser);
     this.audio.mediaSource.connect(this.audio.context.destination);
     this.audio.mode = "file";
-    this.audio.level = 0;
-    this.audio.impact = 0;
+    this.resetAudioDynamics();
     this.setAudioStatus(`Audio source: file (${file.name})`);
     this.updateAudioButtons();
   }
@@ -490,8 +549,7 @@ class CapsuleFerrofluid {
       this.stopMicStream();
       this.stopSystemStream();
       this.audio.mode = "none";
-      this.audio.level = 0;
-      this.audio.impact = 0;
+      this.resetAudioDynamics();
       this.setAudioStatus("Audio source: none");
       this.updateAudioButtons();
       return;
@@ -538,8 +596,7 @@ class CapsuleFerrofluid {
       this.audio.micSource = this.audio.context.createMediaStreamSource(stream);
       this.audio.micSource.connect(this.audio.analyser);
       this.audio.mode = "mic";
-      this.audio.level = 0;
-      this.audio.impact = 0;
+      this.resetAudioDynamics();
       this.setAudioStatus("Audio source: microphone (live)");
       this.updateAudioButtons();
     } catch (error) {
@@ -561,8 +618,7 @@ class CapsuleFerrofluid {
       this.disconnectAudioSources();
       this.stopSystemStream();
       this.audio.mode = "none";
-      this.audio.level = 0;
-      this.audio.impact = 0;
+      this.resetAudioDynamics();
       this.setAudioStatus("Audio source: none");
       this.updateAudioButtons();
       return;
@@ -612,8 +668,7 @@ class CapsuleFerrofluid {
       this.audio.systemSource = this.audio.context.createMediaStreamSource(stream);
       this.audio.systemSource.connect(this.audio.analyser);
       this.audio.mode = "system";
-      this.audio.level = 0;
-      this.audio.impact = 0;
+      this.resetAudioDynamics();
       this.setAudioStatus("Audio source: system output (live)");
       this.updateAudioButtons();
 
@@ -624,8 +679,7 @@ class CapsuleFerrofluid {
         this.disconnectAudioSources();
         this.stopSystemStream();
         this.audio.mode = "none";
-        this.audio.level = 0;
-        this.audio.impact = 0;
+        this.resetAudioDynamics();
         this.setAudioStatus("Audio source: system capture ended");
         this.updateAudioButtons();
       };
@@ -702,58 +756,71 @@ class CapsuleFerrofluid {
 
   sampleAudioSignal(dt) {
     if (!this.params.audioReactive || !this.audio.analyser || !this.audio.bins) {
-      this.audio.impact = 0;
+      this.resetAudioDynamics();
       return { active: false, drive: 0, gate: 0, transient: 0, impact: 0 };
     }
 
     if (this.audio.mode === "none") {
-      this.audio.level = 0;
-      this.audio.impact = 0;
+      this.resetAudioDynamics();
       return { active: false, drive: 0, gate: 0, transient: 0, impact: 0 };
     }
 
     if (this.audio.mode === "file" && this.audio.mediaEl.paused) {
       this.audio.level *= 0.92;
+      this.audio.lowLevel *= 0.9;
+      this.audio.prevLow = this.audio.lowLevel;
       this.audio.impact *= 0.86;
       return { active: false, drive: 0, gate: 0, transient: 0, impact: this.audio.impact };
     }
 
     this.audio.analyser.getByteFrequencyData(this.audio.bins);
-
-    const bassEnd = Math.max(8, Math.floor(this.audio.bins.length * 0.12));
-    const midEnd = Math.max(bassEnd + 8, Math.floor(this.audio.bins.length * 0.34));
-
-    let bass = 0;
-    let mid = 0;
-
-    for (let i = 0; i < bassEnd; i += 1) {
-      bass += this.audio.bins[i];
-    }
-    for (let i = bassEnd; i < midEnd; i += 1) {
-      mid += this.audio.bins[i];
+    if (
+      !this.audio.driveWeights ||
+      !this.audio.lowWeights ||
+      this.audio.driveWeights.length !== this.audio.bins.length ||
+      this.audio.lowWeights.length !== this.audio.bins.length
+    ) {
+      this.buildAudioWeights();
     }
 
-    bass /= bassEnd * 255;
-    mid /= (midEnd - bassEnd) * 255;
+    const driveWeights = this.audio.driveWeights;
+    const lowWeights = this.audio.lowWeights;
+    let driveSum = 0;
+    let lowSum = 0;
+    for (let i = 0; i < this.audio.bins.length; i += 1) {
+      const amplitude = this.audio.bins[i] / 255;
+      driveSum += amplitude * driveWeights[i];
+      lowSum += amplitude * lowWeights[i];
+    }
 
-    const raw = bass * 0.84 + mid * 0.16;
+    const raw = driveSum / this.audio.driveWeightSum;
+    const lowRaw = lowSum / this.audio.lowWeightSum;
     const smooth = clamp(this.params.audioSmoothing, 0, 0.98);
     const follow = 1 - Math.pow(smooth, dt * 60);
     this.audio.level += (raw - this.audio.level) * follow;
+    const lowFollow = 1 - Math.pow(Math.max(0.08, smooth * 0.52), dt * 60);
+    this.audio.lowLevel += (lowRaw - this.audio.lowLevel) * clamp(lowFollow, 0, 1);
 
-    const transient = Math.max(0, raw - this.audio.level);
+    const lowTransient = Math.max(0, lowRaw - this.audio.lowLevel);
+    const lowFlux = Math.max(0, lowRaw - this.audio.prevLow);
+    this.audio.prevLow = lowRaw;
+    const transient = clamp(
+      lowTransient * 1.45 + lowFlux * 1.75 + Math.max(0, raw - this.audio.level) * 0.55,
+      0,
+      1,
+    );
     const threshold = clamp(this.params.audioThreshold, 0, 0.88);
     const normalized = clamp((this.audio.level - threshold) / (1 - threshold), 0, 1);
     const sensitivity = this.params.audioSensitivity;
     const base = clamp(normalized * sensitivity, 0, 1);
-    const shaped = Math.pow(base, 0.56);
-    const transientBoost = clamp(transient * (2.4 + sensitivity * 3.4), 0, 1);
-    const impactRate = transientBoost > this.audio.impact ? 22 : 8;
+    const shaped = Math.pow(base, 0.58);
+    const transientBoost = clamp(transient * (1.5 + sensitivity * 1.8), 0, 1);
+    const impactRate = transientBoost > this.audio.impact ? 28 : 10;
     this.audio.impact +=
       (transientBoost - this.audio.impact) * clamp(impactRate * dt, 0, 1);
 
-    const drive = clamp(shaped + transientBoost * 0.85 + this.audio.impact * 0.55, 0, 1);
-    const gate = drive > 0.12 || transientBoost > 0.08 ? 1 : 0;
+    const drive = clamp(shaped * 0.74 + transientBoost * 0.96 + this.audio.impact * 0.72, 0, 1);
+    const gate = drive > 0.09 || transientBoost > 0.06 ? 1 : 0;
 
     return { active: true, drive, gate, transient: transientBoost, impact: this.audio.impact };
   }
