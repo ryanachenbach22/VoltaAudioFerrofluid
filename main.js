@@ -1,5 +1,5 @@
 const TAU = Math.PI * 2;
-const SUNNY_ROSE_GARDEN_URL = "./assets/sunny_rose_garden_4k.jpg";
+const PRIMARY_ENV_URL = "./assets/monochrome_studio_02_4k.jpg";
 const LOCAL_ENV_FALLBACK_URL = "./reference-ferrofluid/dist/assets/env-map-01.jpg";
 const PROFILE_STORAGE_KEY = "capsule-ferrofluid-profiles-v1";
 const BUILTIN_PROFILE_ID = "client-default";
@@ -133,7 +133,7 @@ class CapsuleFerrofluid {
       blobCohesion: 0.0,
       pointLightColorHex: "#ff0000",
       useHdriReflections: true,
-      showEnvironment: true,
+      showEnvironment: false,
       pointLightIntensity: 2.2,
       sideLightStrength: 2.5,
       envLightStrength: 1.2,
@@ -625,11 +625,11 @@ class CapsuleFerrofluid {
   }
 
   async loadHdriEnvironment() {
-    this.setHdriStatus("HDRI: loading Sunny Rose Garden...");
+    this.setHdriStatus("HDRI: loading Monochrome Studio...");
 
-    const primaryLoaded = await this.tryLoadHdri(SUNNY_ROSE_GARDEN_URL, "Sunny Rose Garden");
+    const primaryLoaded = await this.tryLoadHdri(PRIMARY_ENV_URL, "Monochrome Studio");
     if (primaryLoaded) {
-      this.setHdriStatus("HDRI: Sunny Rose Garden (local)");
+      this.setHdriStatus("HDRI: Monochrome Studio (local)");
       return;
     }
 
@@ -1679,16 +1679,16 @@ class CapsuleFerrofluid {
 
     this.backgroundGradient = this.ctx.createRadialGradient(
       this.width * 0.5,
-      this.height * 0.14,
-      this.scale * 0.1,
+      this.height * 0.46,
+      this.scale * 0.14,
       this.width * 0.5,
-      this.height * 0.84,
-      this.scale * 3.4,
+      this.height * 0.64,
+      this.scale * 2.9,
     );
-    this.backgroundGradient.addColorStop(0, "#ffffff");
-    this.backgroundGradient.addColorStop(0.36, "#f7f9fc");
-    this.backgroundGradient.addColorStop(0.72, "#eef2f8");
-    this.backgroundGradient.addColorStop(1, "#dde4ef");
+    this.backgroundGradient.addColorStop(0, "#2a2d33");
+    this.backgroundGradient.addColorStop(0.42, "#1a1d22");
+    this.backgroundGradient.addColorStop(0.78, "#111318");
+    this.backgroundGradient.addColorStop(1, "#0a0b0e");
 
     this.room = {
       left: this.width * 0.06,
@@ -2958,8 +2958,7 @@ class CapsuleFerrofluid {
       this.drawWhiteRoom();
       this.drawEnvironmentLight();
     } else {
-      ctx.fillStyle = "#000000";
-      ctx.fillRect(0, 0, this.width, this.height);
+      this.drawStudioBackground();
     }
 
     ctx.save();
@@ -2981,6 +2980,47 @@ class CapsuleFerrofluid {
     }
     this.drawCapsuleGlass();
     this.perf.drawMsLast = performance.now() - drawStartMs;
+    ctx.restore();
+  }
+
+  drawStudioBackground() {
+    const ctx = this.ctx;
+    const cx = this.capsule ? this.capsule.cx : this.width * 0.5;
+    const cy = this.capsule ? this.capsule.cy : this.height * 0.5;
+    const rx = this.capsule ? this.capsule.rx : Math.min(this.width, this.height) * 0.24;
+    const ry = this.capsule ? this.capsule.ry : Math.min(this.width, this.height) * 0.33;
+
+    ctx.save();
+    ctx.fillStyle = this.backgroundGradient;
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    const spotlight = ctx.createRadialGradient(
+      cx,
+      cy - ry * 0.08,
+      Math.max(2, rx * 0.18),
+      cx,
+      cy,
+      Math.max(this.width, this.height) * 0.56,
+    );
+    spotlight.addColorStop(0, "rgba(220, 228, 240, 0.08)");
+    spotlight.addColorStop(0.45, "rgba(170, 182, 200, 0.025)");
+    spotlight.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = spotlight;
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    const vignette = ctx.createRadialGradient(
+      cx,
+      cy,
+      Math.max(8, Math.min(rx, ry) * 0.55),
+      cx,
+      cy,
+      Math.hypot(this.width, this.height) * 0.58,
+    );
+    vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
+    vignette.addColorStop(0.62, "rgba(0, 0, 0, 0.14)");
+    vignette.addColorStop(1, "rgba(0, 0, 0, 0.42)");
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, this.width, this.height);
     ctx.restore();
   }
 
