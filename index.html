@@ -14,6 +14,35 @@
       <h1>Capsule Ferrofluid</h1>
       <p>Driver-based ferrofluid motion and real-time audio control.</p>
 
+      <div class="hud-section" data-collapsible data-default-collapsed="true">
+        <button class="hud-section-toggle" type="button" aria-expanded="false">
+          <span class="hud-group-title">Profiles</span>
+          <span class="hud-section-chevron" aria-hidden="true"></span>
+        </button>
+
+        <label for="settingsProfile">Settings profile</label>
+        <div class="control-row">
+          <select id="settingsProfile"></select>
+        </div>
+
+        <div class="button-row">
+          <button id="profileLoad" type="button">Load</button>
+          <button id="profileSave" type="button">Save</button>
+          <button id="profileDelete" type="button">Delete</button>
+        </div>
+
+        <label for="profileName">Save as new</label>
+        <div class="control-row">
+          <input id="profileName" type="text" maxlength="40" placeholder="Profile name" />
+        </div>
+
+        <div class="button-row button-row-single">
+          <button id="profileSaveAs" type="button">Save as new profile</button>
+        </div>
+
+        <p class="audio-status" id="profileStatus">Profiles: ready</p>
+      </div>
+
       <div class="hud-section" data-collapsible>
         <button class="hud-section-toggle" type="button" aria-expanded="true">
           <span class="hud-group-title">Fluid Dynamics</span>
@@ -22,50 +51,50 @@
 
         <label for="magnetStrength">Magnet strength</label>
         <div class="control-row">
-          <input id="magnetStrength" type="range" min="0" max="5000" step="1" value="1200" />
-          <output id="magnetStrength-value">1200</output>
+          <input id="magnetStrength" type="range" min="0" max="5000" step="1" value="1753" />
+          <output id="magnetStrength-value">1753</output>
         </div>
 
         <label for="magnetSize">Magnet size</label>
         <div class="control-row">
-          <input id="magnetSize" type="range" min="0.35" max="5.0" step="0.01" value="1.00" />
-          <output id="magnetSize-value">1.00</output>
+          <input id="magnetSize" type="range" min="0.35" max="5.0" step="0.01" value="1.60" />
+          <output id="magnetSize-value">1.60</output>
         </div>
 
         <label for="gravity">Gravity</label>
         <div class="control-row">
-          <input id="gravity" type="range" min="0" max="180" step="1" value="52" />
-          <output id="gravity-value">52</output>
+          <input id="gravity" type="range" min="0" max="180" step="1" value="0" />
+          <output id="gravity-value">0</output>
         </div>
 
         <label for="density">Density</label>
         <div class="control-row">
-          <input id="density" type="range" min="0.5" max="2.2" step="0.01" value="0.78" />
-          <output id="density-value">0.78</output>
+          <input id="density" type="range" min="0.5" max="2.2" step="0.01" value="1.34" />
+          <output id="density-value">1.34</output>
         </div>
 
         <label for="viscosity">Viscosity</label>
         <div class="control-row">
-          <input id="viscosity" type="range" min="0" max="0.6" step="0.001" value="0.050" />
-          <output id="viscosity-value">0.050</output>
+          <input id="viscosity" type="range" min="0" max="0.6" step="0.001" value="0.145" />
+          <output id="viscosity-value">0.145</output>
         </div>
 
         <label for="resistance">Resistance</label>
         <div class="control-row">
-          <input id="resistance" type="range" min="0" max="2.2" step="0.01" value="0.94" />
-          <output id="resistance-value">0.94</output>
+          <input id="resistance" type="range" min="0" max="2.2" step="0.01" value="0.04" />
+          <output id="resistance-value">0.04</output>
         </div>
 
         <label for="surfaceTension">Surface tension</label>
         <div class="control-row">
-          <input id="surfaceTension" type="range" min="0" max="4.0" step="0.01" value="3.00" />
-          <output id="surfaceTension-value">3.00</output>
+          <input id="surfaceTension" type="range" min="0" max="4.0" step="0.01" value="0.00" />
+          <output id="surfaceTension-value">0.00</output>
         </div>
 
         <label for="blobCohesion">Blob cohesion</label>
         <div class="control-row">
-          <input id="blobCohesion" type="range" min="0" max="8.0" step="0.01" value="0.95" />
-          <output id="blobCohesion-value">0.95</output>
+          <input id="blobCohesion" type="range" min="0" max="8.0" step="0.01" value="0.00" />
+          <output id="blobCohesion-value">0.00</output>
         </div>
       </div>
 
@@ -89,25 +118,25 @@
 
         <label for="driverTravel">Driver travel</label>
         <div class="control-row">
-          <input id="driverTravel" type="range" min="0" max="0.080" step="0.001" value="0.022" />
-          <output id="driverTravel-value">0.022</output>
+          <input id="driverTravel" type="range" min="0" max="0.080" step="0.001" value="0.080" />
+          <output id="driverTravel-value">0.080</output>
         </div>
 
         <label class="checkbox-row" for="manualPulse">
-          <input id="manualPulse" type="checkbox" checked />
+          <input id="manualPulse" type="checkbox" />
           <span>Manual pulse mode (mouse)</span>
         </label>
 
         <label class="checkbox-row" for="audioReactive">
-          <input id="audioReactive" type="checkbox" />
+          <input id="audioReactive" type="checkbox" checked />
           <span>Audio reactive drive</span>
         </label>
 
         <label for="driveMode">Driver behavior</label>
         <div class="control-row">
           <select id="driveMode">
-            <option value="gate" selected>Magnet on/off</option>
-            <option value="inout">Magnet in/out</option>
+            <option value="gate">Magnet on/off</option>
+            <option value="inout" selected>Magnet in/out</option>
           </select>
         </div>
       </div>
@@ -131,20 +160,20 @@
 
         <label for="audioSensitivity">Audio sensitivity</label>
         <div class="control-row">
-          <input id="audioSensitivity" type="range" min="0.4" max="8.0" step="0.01" value="1.37" />
-          <output id="audioSensitivity-value">1.37</output>
+          <input id="audioSensitivity" type="range" min="0.4" max="8.0" step="0.01" value="1.56" />
+          <output id="audioSensitivity-value">1.56</output>
         </div>
 
         <label for="audioSmoothing">Audio smoothing</label>
         <div class="control-row">
-          <input id="audioSmoothing" type="range" min="0" max="0.98" step="0.01" value="0.72" />
-          <output id="audioSmoothing-value">0.72</output>
+          <input id="audioSmoothing" type="range" min="0" max="0.98" step="0.01" value="0.98" />
+          <output id="audioSmoothing-value">0.98</output>
         </div>
 
         <label for="audioThreshold">Audio threshold</label>
         <div class="control-row">
-          <input id="audioThreshold" type="range" min="0" max="0.7" step="0.01" value="0.51" />
-          <output id="audioThreshold-value">0.51</output>
+          <input id="audioThreshold" type="range" min="0" max="0.7" step="0.01" value="0.70" />
+          <output id="audioThreshold-value">0.70</output>
         </div>
 
         <p class="audio-status" id="audioStatus">Audio source: none</p>
@@ -160,8 +189,8 @@
 
         <label for="renderQuality">Render quality</label>
         <div class="control-row">
-          <input id="renderQuality" type="range" min="0.6" max="2.4" step="0.05" value="1.00" />
-          <output id="renderQuality-value">1.00</output>
+          <input id="renderQuality" type="range" min="0.6" max="2.4" step="0.05" value="0.85" />
+          <output id="renderQuality-value">0.85</output>
         </div>
 
         <label for="cameraOffsetX">Camera offset X</label>
@@ -217,32 +246,32 @@
 
         <label for="reflectivity">Reflectivity</label>
         <div class="control-row">
-          <input id="reflectivity" type="range" min="0" max="2.2" step="0.01" value="0.52" />
-          <output id="reflectivity-value">0.52</output>
+          <input id="reflectivity" type="range" min="0" max="2.2" step="0.01" value="2.20" />
+          <output id="reflectivity-value">2.20</output>
         </div>
 
         <label for="surfaceSharpness">Surface sharpness</label>
         <div class="control-row">
-          <input id="surfaceSharpness" type="range" min="0.6" max="2.6" step="0.01" value="1.35" />
-          <output id="surfaceSharpness-value">1.35</output>
+          <input id="surfaceSharpness" type="range" min="0.6" max="2.6" step="0.01" value="2.60" />
+          <output id="surfaceSharpness-value">2.60</output>
         </div>
 
         <label for="depthBoost">Depth boost</label>
         <div class="control-row">
-          <input id="depthBoost" type="range" min="0.7" max="2.5" step="0.01" value="1.30" />
-          <output id="depthBoost-value">1.30</output>
+          <input id="depthBoost" type="range" min="0.7" max="2.5" step="0.01" value="2.50" />
+          <output id="depthBoost-value">2.50</output>
         </div>
 
         <label for="reflectionClarity">Reflection clarity</label>
         <div class="control-row">
-          <input id="reflectionClarity" type="range" min="0.5" max="2.5" step="0.01" value="1.35" />
-          <output id="reflectionClarity-value">1.35</output>
+          <input id="reflectionClarity" type="range" min="0.5" max="2.5" step="0.01" value="1.20" />
+          <output id="reflectionClarity-value">1.20</output>
         </div>
 
         <label for="impactHighlights">Impact highlights</label>
         <div class="control-row">
-          <input id="impactHighlights" type="range" min="0" max="2.5" step="0.01" value="1.15" />
-          <output id="impactHighlights-value">1.15</output>
+          <input id="impactHighlights" type="range" min="0" max="2.5" step="0.01" value="2.50" />
+          <output id="impactHighlights-value">2.50</output>
         </div>
 
         <label for="iridescenceStrength">Oil-slick intensity</label>
@@ -285,14 +314,14 @@
 
         <label for="pointLightIntensity">LED intensity</label>
         <div class="control-row">
-          <input id="pointLightIntensity" type="range" min="0" max="2.2" step="0.01" value="1.00" />
-          <output id="pointLightIntensity-value">1.00</output>
+          <input id="pointLightIntensity" type="range" min="0" max="2.2" step="0.01" value="2.20" />
+          <output id="pointLightIntensity-value">2.20</output>
         </div>
 
         <label for="sideLightStrength">Side illumination</label>
         <div class="control-row">
-          <input id="sideLightStrength" type="range" min="0" max="2.5" step="0.01" value="1.00" />
-          <output id="sideLightStrength-value">1.00</output>
+          <input id="sideLightStrength" type="range" min="0" max="2.5" step="0.01" value="2.50" />
+          <output id="sideLightStrength-value">2.50</output>
         </div>
 
         <label for="envLightStrength">HDRI response</label>

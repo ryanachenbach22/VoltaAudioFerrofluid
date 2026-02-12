@@ -1,6 +1,54 @@
 const TAU = Math.PI * 2;
 const SUNNY_ROSE_GARDEN_URL = "./assets/sunny_rose_garden_4k.jpg";
 const LOCAL_ENV_FALLBACK_URL = "./reference-ferrofluid/dist/assets/env-map-01.jpg";
+const PROFILE_STORAGE_KEY = "capsule-ferrofluid-profiles-v1";
+const BUILTIN_PROFILE_ID = "client-default";
+
+const PROFILE_NUMERIC_KEYS = [
+  "magnetStrength",
+  "magnetSize",
+  "gravity",
+  "renderQuality",
+  "cameraOffsetX",
+  "cameraYaw",
+  "cameraOffsetY",
+  "pulseHz",
+  "pulseAggression",
+  "driverTravel",
+  "density",
+  "viscosity",
+  "resistance",
+  "surfaceTension",
+  "blobCohesion",
+  "pointLightIntensity",
+  "sideLightStrength",
+  "envLightStrength",
+  "pointLightOffsetX",
+  "pointLightOffsetY",
+  "exposure",
+  "fluidTint",
+  "reflectivity",
+  "surfaceSharpness",
+  "depthBoost",
+  "reflectionClarity",
+  "impactHighlights",
+  "iridescenceStrength",
+  "plexiFilmStrength",
+  "plexiFilmDiffusion",
+  "audioSensitivity",
+  "audioSmoothing",
+  "audioThreshold",
+];
+
+const PROFILE_BOOLEAN_KEYS = [
+  "viewMagnet",
+  "manualPulse",
+  "audioReactive",
+  "enableOrbitDrag",
+  "useHdriReflections",
+];
+
+const PROFILE_STRING_KEYS = ["driveMode", "fluidColorHex", "pointLightColorHex"];
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -29,6 +77,20 @@ const hexToRgb01 = (hex) => {
   ];
 };
 
+const normalizeHexColor = (value, fallback) => {
+  const fallbackSafe = typeof fallback === "string" && /^#[0-9a-f]{6}$/i.test(fallback)
+    ? fallback.toLowerCase()
+    : "#ffffff";
+  if (typeof value !== "string") {
+    return fallbackSafe;
+  }
+  const trimmed = value.trim();
+  if (!/^#[0-9a-f]{6}$/i.test(trimmed)) {
+    return fallbackSafe;
+  }
+  return trimmed.toLowerCase();
+};
+
 const compressHighlight = (value, exposure = 0.88) => {
   const safe = Math.max(0, value);
   return 255 * (1 - Math.exp(-((safe / 255) * exposure)));
@@ -51,26 +113,26 @@ class CapsuleFerrofluid {
 
     this.params = {
       particleCount: 90,
-      magnetStrength: 1200,
-      magnetSize: 1.0,
-      gravity: 52,
-      renderQuality: 1.0,
+      magnetStrength: 1753,
+      magnetSize: 1.6,
+      gravity: 0,
+      renderQuality: 0.85,
       cameraOffsetX: 0.08,
       cameraYaw: 10.0,
       cameraOffsetY: -0.04,
       enableOrbitDrag: true,
       pulseHz: 8.4,
       pulseAggression: 7.2,
-      driverTravel: 0.022,
-      density: 0.78,
-      viscosity: 0.05,
-      resistance: 0.94,
-      surfaceTension: 3.0,
-      blobCohesion: 0.95,
+      driverTravel: 0.08,
+      density: 1.34,
+      viscosity: 0.145,
+      resistance: 0.04,
+      surfaceTension: 0.0,
+      blobCohesion: 0.0,
       pointLightColorHex: "#ff0000",
       useHdriReflections: true,
-      pointLightIntensity: 1.0,
-      sideLightStrength: 1.0,
+      pointLightIntensity: 2.2,
+      sideLightStrength: 2.5,
       envLightStrength: 1.2,
       pointLightOffsetX: -0.25,
       pointLightOffsetY: -0.47,
@@ -78,27 +140,37 @@ class CapsuleFerrofluid {
       ambientStrength: 0.36,
       occlusionStrength: 0.58,
       fluidColorHex: "#0062ff",
-      fluidTint: 0.22,
-      reflectivity: 1.36,
-      surfaceSharpness: 1.35,
-      depthBoost: 1.3,
-      reflectionClarity: 1.35,
-      impactHighlights: 1.3,
+      fluidTint: 0.81,
+      reflectivity: 2.2,
+      surfaceSharpness: 2.6,
+      depthBoost: 2.5,
+      reflectionClarity: 1.2,
+      impactHighlights: 2.5,
       iridescenceStrength: 0.0,
       plexiFilmStrength: 0.24,
       plexiFilmDiffusion: 0.42,
-      audioReactive: false,
-      driveMode: "gate",
-      audioSensitivity: 1.37,
-      audioSmoothing: 0.72,
-      audioThreshold: 0.51,
-      manualPulse: true,
+      audioReactive: true,
+      driveMode: "inout",
+      audioSensitivity: 1.56,
+      audioSmoothing: 0.98,
+      audioThreshold: 0.7,
+      manualPulse: false,
       viewMagnet: false,
       cohesion: 76,
       repulsion: 168,
       centerPull: 0.38,
       clusterBalance: 0.5,
     };
+    this.defaultParams = { ...this.params };
+    this.controlBindings = {};
+    this.checkboxBindings = {};
+    this.colorBindings = {};
+    this.selectBindings = {};
+    this.profileState = { profiles: [], activeProfileId: BUILTIN_PROFILE_ID };
+    this.profileSelectEl = null;
+    this.profileNameInputEl = null;
+    this.profileStatusEl = null;
+    this.initProfiles();
 
     this.lastTimestamp = 0;
     this.time = 0;
@@ -166,6 +238,7 @@ class CapsuleFerrofluid {
     this.bindOrbit();
     this.bindManualPulse();
     this.bindAudioControls();
+    this.bindProfileControls();
 
     window.addEventListener("resize", () => this.resize());
     window.addEventListener("beforeunload", () => {
@@ -261,6 +334,283 @@ class CapsuleFerrofluid {
     this.audio.lowWeights = lowWeights;
     this.audio.driveWeightSum = Math.max(0.0001, driveWeightSum);
     this.audio.lowWeightSum = Math.max(0.0001, lowWeightSum);
+  }
+
+  getBuiltInProfile() {
+    return {
+      id: BUILTIN_PROFILE_ID,
+      name: "Client Default",
+      builtIn: true,
+      values: this.sanitizeProfileValues(this.defaultParams),
+    };
+  }
+
+  sanitizeProfileValues(values) {
+    const source = values && typeof values === "object" ? values : {};
+    const defaults = this.defaultParams;
+    const sanitized = {};
+
+    for (const key of PROFILE_NUMERIC_KEYS) {
+      const fallback = Number(defaults[key]);
+      const parsed = Number(source[key]);
+      sanitized[key] = Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    for (const key of PROFILE_BOOLEAN_KEYS) {
+      const fallback = Boolean(defaults[key]);
+      sanitized[key] = typeof source[key] === "boolean" ? source[key] : fallback;
+    }
+
+    const fallbackDriveMode = defaults.driveMode === "inout" ? "inout" : "gate";
+    sanitized.driveMode = source.driveMode === "inout" || source.driveMode === "gate"
+      ? source.driveMode
+      : fallbackDriveMode;
+    sanitized.fluidColorHex = normalizeHexColor(source.fluidColorHex, defaults.fluidColorHex);
+    sanitized.pointLightColorHex = normalizeHexColor(
+      source.pointLightColorHex,
+      defaults.pointLightColorHex,
+    );
+
+    return sanitized;
+  }
+
+  collectProfileValues() {
+    const values = {};
+    for (const key of PROFILE_NUMERIC_KEYS) {
+      values[key] = Number(this.params[key]);
+    }
+    for (const key of PROFILE_BOOLEAN_KEYS) {
+      values[key] = Boolean(this.params[key]);
+    }
+    values.driveMode = this.params.driveMode === "inout" ? "inout" : "gate";
+    values.fluidColorHex = normalizeHexColor(this.params.fluidColorHex, this.defaultParams.fluidColorHex);
+    values.pointLightColorHex = normalizeHexColor(
+      this.params.pointLightColorHex,
+      this.defaultParams.pointLightColorHex,
+    );
+    return values;
+  }
+
+  applyProfileValues(values, syncControls = false) {
+    const sanitized = this.sanitizeProfileValues(values);
+    for (const key of PROFILE_NUMERIC_KEYS) {
+      this.params[key] = sanitized[key];
+    }
+    for (const key of PROFILE_BOOLEAN_KEYS) {
+      this.params[key] = sanitized[key];
+    }
+    for (const key of PROFILE_STRING_KEYS) {
+      this.params[key] = sanitized[key];
+    }
+
+    this.pointLightColor = hexToRgb01(this.params.pointLightColorHex);
+    this.fluidColor = hexToRgb01(this.params.fluidColorHex);
+    this.manualPulseHeld = false;
+    this.pulseEnvelope = 0;
+    this.prevPulseDrive = 0;
+
+    if (syncControls) {
+      this.syncControlsFromParams();
+    }
+  }
+
+  loadProfilesFromStorage() {
+    const builtIn = this.getBuiltInProfile();
+    const profiles = [builtIn];
+    let activeProfileId = builtIn.id;
+
+    try {
+      const raw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+      if (!raw) {
+        return { profiles, activeProfileId };
+      }
+
+      const parsed = JSON.parse(raw);
+      const storedProfiles = Array.isArray(parsed?.profiles) ? parsed.profiles : [];
+      for (const entry of storedProfiles) {
+        if (!entry || typeof entry !== "object") {
+          continue;
+        }
+        const id = typeof entry.id === "string" ? entry.id : "";
+        if (!id || id === BUILTIN_PROFILE_ID) {
+          continue;
+        }
+        const name = typeof entry.name === "string" && entry.name.trim()
+          ? entry.name.trim()
+          : "Custom Profile";
+        profiles.push({
+          id,
+          name,
+          builtIn: false,
+          values: this.sanitizeProfileValues(entry.values),
+        });
+      }
+
+      const parsedActive = typeof parsed?.activeProfileId === "string" ? parsed.activeProfileId : "";
+      if (profiles.some((profile) => profile.id === parsedActive)) {
+        activeProfileId = parsedActive;
+      }
+    } catch (error) {
+      console.warn("Failed to load saved profiles:", error);
+    }
+
+    return { profiles, activeProfileId };
+  }
+
+  saveProfilesToStorage() {
+    try {
+      const storedProfiles = this.profileState.profiles
+        .filter((profile) => !profile.builtIn)
+        .map((profile) => ({
+          id: profile.id,
+          name: profile.name,
+          values: this.sanitizeProfileValues(profile.values),
+        }));
+      window.localStorage.setItem(
+        PROFILE_STORAGE_KEY,
+        JSON.stringify({
+          profiles: storedProfiles,
+          activeProfileId: this.profileState.activeProfileId,
+        }),
+      );
+    } catch (error) {
+      console.warn("Failed to save profiles:", error);
+    }
+  }
+
+  getProfileById(profileId) {
+    return this.profileState.profiles.find((profile) => profile.id === profileId) || null;
+  }
+
+  initProfiles() {
+    this.profileState = this.loadProfilesFromStorage();
+    const activeProfile = this.getProfileById(this.profileState.activeProfileId) || this.getBuiltInProfile();
+    this.profileState.activeProfileId = activeProfile.id;
+    this.applyProfileValues(activeProfile.values, false);
+  }
+
+  setProfileStatus(message) {
+    if (this.profileStatusEl) {
+      this.profileStatusEl.textContent = message;
+    }
+  }
+
+  populateProfileOptions() {
+    if (!(this.profileSelectEl instanceof HTMLSelectElement)) {
+      return;
+    }
+
+    this.profileSelectEl.innerHTML = "";
+    for (const profile of this.profileState.profiles) {
+      const option = document.createElement("option");
+      option.value = profile.id;
+      option.textContent = profile.builtIn ? `${profile.name} (built-in)` : profile.name;
+      this.profileSelectEl.appendChild(option);
+    }
+    this.profileSelectEl.value = this.profileState.activeProfileId;
+  }
+
+  applyProfileById(profileId, persist = true) {
+    const profile = this.getProfileById(profileId) || this.getProfileById(BUILTIN_PROFILE_ID);
+    if (!profile) {
+      return;
+    }
+    this.applyProfileValues(profile.values, true);
+    this.profileState.activeProfileId = profile.id;
+    this.populateProfileOptions();
+    if (persist) {
+      this.saveProfilesToStorage();
+    }
+    this.setProfileStatus(`Loaded profile: ${profile.name}`);
+  }
+
+  bindProfileControls() {
+    this.profileSelectEl = document.getElementById("settingsProfile");
+    this.profileNameInputEl = document.getElementById("profileName");
+    this.profileStatusEl = document.getElementById("profileStatus");
+    const loadBtn = document.getElementById("profileLoad");
+    const saveBtn = document.getElementById("profileSave");
+    const saveAsBtn = document.getElementById("profileSaveAs");
+    const deleteBtn = document.getElementById("profileDelete");
+
+    if (!(this.profileSelectEl instanceof HTMLSelectElement)) {
+      return;
+    }
+
+    this.populateProfileOptions();
+    this.setProfileStatus("Profiles: ready");
+
+    if (loadBtn instanceof HTMLButtonElement) {
+      loadBtn.addEventListener("click", () => {
+        this.applyProfileById(this.profileSelectEl.value, true);
+      });
+    }
+
+    if (saveBtn instanceof HTMLButtonElement) {
+      saveBtn.addEventListener("click", () => {
+        const profile = this.getProfileById(this.profileSelectEl.value);
+        if (!profile) {
+          this.setProfileStatus("Profiles: selected profile not found");
+          return;
+        }
+        if (profile.builtIn) {
+          this.setProfileStatus("Built-in profile is read-only. Use Save as new.");
+          return;
+        }
+        profile.values = this.collectProfileValues();
+        this.profileState.activeProfileId = profile.id;
+        this.saveProfilesToStorage();
+        this.populateProfileOptions();
+        this.setProfileStatus(`Saved profile: ${profile.name}`);
+      });
+    }
+
+    if (saveAsBtn instanceof HTMLButtonElement) {
+      saveAsBtn.addEventListener("click", () => {
+        const rawName =
+          this.profileNameInputEl instanceof HTMLInputElement ? this.profileNameInputEl.value : "";
+        const trimmedName = rawName.trim();
+        const profileName = trimmedName || `Profile ${this.profileState.profiles.length}`;
+        const profileId = `custom-${Date.now().toString(36)}-${Math.floor(Math.random() * 0x10000).toString(36)}`;
+        const nextProfile = {
+          id: profileId,
+          name: profileName,
+          builtIn: false,
+          values: this.collectProfileValues(),
+        };
+        this.profileState.profiles.push(nextProfile);
+        this.profileState.activeProfileId = profileId;
+        this.saveProfilesToStorage();
+        this.populateProfileOptions();
+        if (this.profileNameInputEl instanceof HTMLInputElement) {
+          this.profileNameInputEl.value = "";
+        }
+        this.setProfileStatus(`Created profile: ${profileName}`);
+      });
+    }
+
+    if (deleteBtn instanceof HTMLButtonElement) {
+      deleteBtn.addEventListener("click", () => {
+        const profile = this.getProfileById(this.profileSelectEl.value);
+        if (!profile) {
+          this.setProfileStatus("Profiles: selected profile not found");
+          return;
+        }
+        if (profile.builtIn) {
+          this.setProfileStatus("Built-in profile cannot be deleted");
+          return;
+        }
+
+        this.profileState.profiles = this.profileState.profiles.filter(
+          (entry) => entry.id !== profile.id,
+        );
+        const fallbackProfile = this.getProfileById(BUILTIN_PROFILE_ID);
+        if (fallbackProfile) {
+          this.applyProfileById(fallbackProfile.id, true);
+          this.setProfileStatus(`Deleted profile: ${profile.name}`);
+        }
+      });
+    }
   }
 
   setHdriStatus(message) {
@@ -748,6 +1098,8 @@ class CapsuleFerrofluid {
         this.params.driveMode = driveModeInput.value === "inout" ? "inout" : "gate";
         this.prevPulseDrive = 0;
       };
+      this.selectBindings.driveMode = { input: driveModeInput, update: updateDriveMode };
+      driveModeInput.value = this.params.driveMode === "inout" ? "inout" : "gate";
       driveModeInput.addEventListener("change", updateDriveMode);
       updateDriveMode();
     }
@@ -827,96 +1179,74 @@ class CapsuleFerrofluid {
     return { active: true, drive, gate, transient: transientBoost, impact: this.audio.impact };
   }
 
+  formatNumericControlValue(id, numeric) {
+    if (id === "renderQuality") {
+      return numeric.toFixed(2);
+    }
+    if (id === "viscosity" || id === "driverTravel") {
+      return numeric.toFixed(3);
+    }
+    if (
+      id === "cameraOffsetX" ||
+      id === "cameraOffsetY" ||
+      id === "magnetSize" ||
+      id === "density" ||
+      id === "resistance" ||
+      id === "surfaceTension" ||
+      id === "blobCohesion" ||
+      id === "pointLightIntensity" ||
+      id === "sideLightStrength" ||
+      id === "envLightStrength" ||
+      id === "pointLightOffsetX" ||
+      id === "pointLightOffsetY" ||
+      id === "exposure" ||
+      id === "fluidTint" ||
+      id === "reflectivity" ||
+      id === "surfaceSharpness" ||
+      id === "depthBoost" ||
+      id === "reflectionClarity" ||
+      id === "impactHighlights" ||
+      id === "iridescenceStrength" ||
+      id === "plexiFilmStrength" ||
+      id === "plexiFilmDiffusion" ||
+      id === "audioSensitivity" ||
+      id === "audioSmoothing" ||
+      id === "audioThreshold"
+    ) {
+      return numeric.toFixed(2);
+    }
+    if (id === "pulseHz" || id === "pulseAggression" || id === "cameraYaw") {
+      return numeric.toFixed(1);
+    }
+    return numeric.toFixed(0);
+  }
+
   bindControls() {
-    const ids = [
-      "magnetStrength",
-      "magnetSize",
-      "gravity",
-      "renderQuality",
-      "cameraOffsetX",
-      "cameraYaw",
-      "cameraOffsetY",
-      "pulseHz",
-      "pulseAggression",
-      "driverTravel",
-      "density",
-      "viscosity",
-      "resistance",
-      "surfaceTension",
-      "blobCohesion",
-      "pointLightIntensity",
-      "sideLightStrength",
-      "envLightStrength",
-      "pointLightOffsetX",
-      "pointLightOffsetY",
-      "exposure",
-      "fluidTint",
-      "reflectivity",
-      "surfaceSharpness",
-      "depthBoost",
-      "reflectionClarity",
-      "impactHighlights",
-      "iridescenceStrength",
-      "plexiFilmStrength",
-      "plexiFilmDiffusion",
-      "audioSensitivity",
-      "audioSmoothing",
-      "audioThreshold",
-    ];
+    const ids = [...PROFILE_NUMERIC_KEYS];
+    this.numericControlIds = ids;
+    this.suspendControlResizes = false;
 
     for (const id of ids) {
       const input = document.getElementById(id);
       const output = document.getElementById(`${id}-value`);
-      if (!input || !output) {
+      if (!(input instanceof HTMLInputElement) || !(output instanceof HTMLOutputElement)) {
         continue;
       }
 
       const update = () => {
         const numeric = Number(input.value);
         this.params[id] = numeric;
-        if (id === "renderQuality") {
-          output.textContent = numeric.toFixed(2);
-        } else if (id === "viscosity" || id === "driverTravel") {
-          output.textContent = numeric.toFixed(3);
-        } else if (
-          id === "cameraOffsetX" ||
-          id === "cameraOffsetY" ||
-          id === "magnetSize" ||
-          id === "density" ||
-          id === "resistance" ||
-          id === "surfaceTension" ||
-          id === "blobCohesion" ||
-          id === "pointLightIntensity" ||
-          id === "sideLightStrength" ||
-          id === "envLightStrength" ||
-          id === "pointLightOffsetX" ||
-          id === "pointLightOffsetY" ||
-          id === "exposure" ||
-          id === "fluidTint" ||
-          id === "reflectivity" ||
-          id === "surfaceSharpness" ||
-          id === "depthBoost" ||
-          id === "reflectionClarity" ||
-          id === "impactHighlights" ||
-          id === "iridescenceStrength" ||
-          id === "plexiFilmStrength" ||
-          id === "plexiFilmDiffusion" ||
-          id === "audioSensitivity" ||
-          id === "audioSmoothing" ||
-          id === "audioThreshold"
-        ) {
-          output.textContent = numeric.toFixed(2);
-        } else if (id === "pulseHz" || id === "pulseAggression" || id === "cameraYaw") {
-          output.textContent = numeric.toFixed(1);
-        } else {
-          output.textContent = numeric.toFixed(0);
-        }
+        output.textContent = this.formatNumericControlValue(id, numeric);
 
-        if (id === "renderQuality") {
+        if (id === "renderQuality" && !this.suspendControlResizes) {
           this.resize();
         }
       };
 
+      this.controlBindings[id] = { input, output, update };
+      if (Number.isFinite(this.params[id])) {
+        input.value = String(this.params[id]);
+      }
       input.addEventListener("input", update);
       update();
     }
@@ -928,10 +1258,16 @@ class CapsuleFerrofluid {
       pointLightColorOutput instanceof HTMLOutputElement
     ) {
       const updatePointLightColor = () => {
-        this.params.pointLightColorHex = pointLightColorInput.value || "#ff0000";
+        this.params.pointLightColorHex = normalizeHexColor(pointLightColorInput.value, "#ff0000");
         this.pointLightColor = hexToRgb01(this.params.pointLightColorHex);
-        pointLightColorOutput.textContent = this.params.pointLightColorHex.toLowerCase();
+        pointLightColorOutput.textContent = this.params.pointLightColorHex;
       };
+      this.colorBindings.pointLightColorHex = {
+        input: pointLightColorInput,
+        output: pointLightColorOutput,
+        update: updatePointLightColor,
+      };
+      pointLightColorInput.value = this.params.pointLightColorHex;
       pointLightColorInput.addEventListener("input", updatePointLightColor);
       updatePointLightColor();
     }
@@ -940,10 +1276,16 @@ class CapsuleFerrofluid {
     const fluidColorOutput = document.getElementById("fluidColor-value");
     if (fluidColorInput instanceof HTMLInputElement && fluidColorOutput instanceof HTMLOutputElement) {
       const updateFluidColor = () => {
-        this.params.fluidColorHex = fluidColorInput.value || "#0062ff";
+        this.params.fluidColorHex = normalizeHexColor(fluidColorInput.value, "#0062ff");
         this.fluidColor = hexToRgb01(this.params.fluidColorHex);
-        fluidColorOutput.textContent = this.params.fluidColorHex.toLowerCase();
+        fluidColorOutput.textContent = this.params.fluidColorHex;
       };
+      this.colorBindings.fluidColorHex = {
+        input: fluidColorInput,
+        output: fluidColorOutput,
+        update: updateFluidColor,
+      };
+      fluidColorInput.value = this.params.fluidColorHex;
       fluidColorInput.addEventListener("input", updateFluidColor);
       updateFluidColor();
     }
@@ -971,9 +1313,63 @@ class CapsuleFerrofluid {
         }
       };
 
+      this.checkboxBindings[control.key] = { input, update: updateToggle };
+      input.checked = Boolean(this.params[control.key]);
       input.addEventListener("change", updateToggle);
       updateToggle();
     }
+  }
+
+  syncControlsFromParams() {
+    this.suspendControlResizes = true;
+    for (const id of this.numericControlIds) {
+      if (id === "renderQuality") {
+        continue;
+      }
+      const binding = this.controlBindings[id];
+      if (!binding || !Number.isFinite(this.params[id])) {
+        continue;
+      }
+      binding.input.value = String(this.params[id]);
+      binding.update();
+    }
+
+    for (const key of PROFILE_BOOLEAN_KEYS) {
+      const binding = this.checkboxBindings[key];
+      if (!binding) {
+        continue;
+      }
+      binding.input.checked = Boolean(this.params[key]);
+      binding.update();
+    }
+
+    const pointLightColorBinding = this.colorBindings.pointLightColorHex;
+    if (pointLightColorBinding) {
+      pointLightColorBinding.input.value = normalizeHexColor(this.params.pointLightColorHex, "#ff0000");
+      pointLightColorBinding.update();
+    }
+
+    const fluidColorBinding = this.colorBindings.fluidColorHex;
+    if (fluidColorBinding) {
+      fluidColorBinding.input.value = normalizeHexColor(this.params.fluidColorHex, "#0062ff");
+      fluidColorBinding.update();
+    }
+
+    const driveModeBinding = this.selectBindings.driveMode;
+    if (driveModeBinding) {
+      driveModeBinding.input.value = this.params.driveMode === "inout" ? "inout" : "gate";
+      driveModeBinding.update();
+    }
+
+    this.suspendControlResizes = false;
+    const renderQualityBinding = this.controlBindings.renderQuality;
+    if (renderQualityBinding && Number.isFinite(this.params.renderQuality)) {
+      renderQualityBinding.input.value = String(this.params.renderQuality);
+      renderQualityBinding.update();
+    }
+
+    this.updateViewOffset();
+    this.updatePointLightPosition();
   }
 
   bindHudSections() {
