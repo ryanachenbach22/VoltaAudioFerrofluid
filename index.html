@@ -87,6 +87,12 @@
           <output id="pulseAggression-value">7.2</output>
         </div>
 
+        <label for="driverTravel">Driver travel</label>
+        <div class="control-row">
+          <input id="driverTravel" type="range" min="0" max="0.080" step="0.001" value="0.022" />
+          <output id="driverTravel-value">0.022</output>
+        </div>
+
         <label class="checkbox-row" for="manualPulse">
           <input id="manualPulse" type="checkbox" checked />
           <span>Manual pulse mode (mouse)</span>
@@ -300,6 +306,19 @@
           <input id="pointLightOffsetY" type="range" min="-1" max="1" step="0.01" value="-0.47" />
           <output id="pointLightOffsetY-value">-0.47</output>
         </div>
+      </div>
+
+      <div class="hud-section" data-collapsible data-default-collapsed="true">
+        <button class="hud-section-toggle" type="button" aria-expanded="false">
+          <span class="hud-group-title">Performance</span>
+          <span class="hud-section-chevron" aria-hidden="true"></span>
+        </button>
+        <p class="audio-status">FPS: <span id="perfFps">--</span></p>
+        <p class="audio-status">Step (physics): <span id="perfStepMs">--</span> ms</p>
+        <p class="audio-status">Field build: <span id="perfFieldMs">--</span> ms</p>
+        <p class="audio-status">Field shading: <span id="perfShadeMs">--</span> ms</p>
+        <p class="audio-status">Draw/composite: <span id="perfDrawMs">--</span> ms</p>
+        <p class="audio-status" id="perfBottleneck">Bottleneck: --</p>
       </div>
     </section>
   </body>

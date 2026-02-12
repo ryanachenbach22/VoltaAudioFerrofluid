@@ -61,6 +61,7 @@ class CapsuleFerrofluid {
       enableOrbitDrag: true,
       pulseHz: 8.4,
       pulseAggression: 7.2,
+      driverTravel: 0.022,
       density: 0.78,
       viscosity: 0.05,
       resistance: 0.94,
@@ -115,6 +116,26 @@ class CapsuleFerrofluid {
     this.orbitLastX = 0;
     this.orbitLastY = 0;
     this.motionHighlight = 0;
+    this.perf = {
+      frameMsAvg: 0,
+      stepMsAvg: 0,
+      fieldMsAvg: 0,
+      shadeMsAvg: 0,
+      drawMsAvg: 0,
+      fpsAvg: 0,
+      lastHudUpdateMs: 0,
+      fieldMsLast: 0,
+      shadeMsLast: 0,
+      drawMsLast: 0,
+    };
+    this.perfEls = {
+      fps: document.getElementById("perfFps"),
+      stepMs: document.getElementById("perfStepMs"),
+      fieldMs: document.getElementById("perfFieldMs"),
+      shadeMs: document.getElementById("perfShadeMs"),
+      drawMs: document.getElementById("perfDrawMs"),
+      bottleneck: document.getElementById("perfBottleneck"),
+    };
 
     this.pointLightColor = hexToRgb01(this.params.pointLightColorHex);
     this.fluidColor = hexToRgb01(this.params.fluidColorHex);
@@ -748,6 +769,7 @@ class CapsuleFerrofluid {
       "cameraOffsetY",
       "pulseHz",
       "pulseAggression",
+      "driverTravel",
       "density",
       "viscosity",
       "resistance",
@@ -783,7 +805,7 @@ class CapsuleFerrofluid {
         this.params[id] = numeric;
         if (id === "renderQuality") {
           output.textContent = numeric.toFixed(2);
-        } else if (id === "viscosity") {
+        } else if (id === "viscosity" || id === "driverTravel") {
           output.textContent = numeric.toFixed(3);
         } else if (
           id === "cameraOffsetX" ||
@@ -1115,7 +1137,14 @@ class CapsuleFerrofluid {
     this.invSigma2 = 1 / (2 * this.sigma * this.sigma);
     this.influenceRadius = this.sigma * 3.1;
     this.influenceRadiusSq = this.influenceRadius * this.influenceRadius;
+    this.invInfluenceRadiusSq = 1 / Math.max(0.0001, this.influenceRadiusSq);
     this.fieldGridCellSize = Math.max(1, this.influenceRadius);
+    this.gaussLutSize = 512;
+    this.gaussLut = new Float32Array(this.gaussLutSize + 1);
+    for (let i = 0; i <= this.gaussLutSize; i += 1) {
+      const distSq = this.influenceRadiusSq * (i / this.gaussLutSize);
+      this.gaussLut[i] = Math.exp(-distSq * this.invSigma2);
+    }
 
     // Add margin so the scalar field is never clipped right at capsule bounds.
     // This avoids flat/rectangular artifacts when fluid settles near edges.
@@ -1147,19 +1176,30 @@ class CapsuleFerrofluid {
 
     this.fieldImageData = this.fieldCtx.createImageData(this.fieldWidth, this.fieldHeight);
     this.fieldValues = new Float32Array(this.fieldWidth * this.fieldHeight);
-    this.fieldIsolated = new Float32Array(this.fieldWidth * this.fieldHeight);
 
     this.worldXs = new Float32Array(this.fieldWidth);
     this.worldYs = new Float32Array(this.fieldHeight);
+    this.fieldCellXs = new Int16Array(this.fieldWidth);
+    this.fieldCellYs = new Int16Array(this.fieldHeight);
 
     for (let x = 0; x < this.fieldWidth; x += 1) {
       const u = x / (this.fieldWidth - 1 || 1);
       this.worldXs[x] = this.fieldBounds.x + u * this.fieldBounds.w;
+      this.fieldCellXs[x] = clamp(
+        Math.floor((this.worldXs[x] - this.fieldBounds.x) / this.fieldGridCellSize),
+        0,
+        this.fieldGridCols - 1,
+      );
     }
 
     for (let y = 0; y < this.fieldHeight; y += 1) {
       const v = y / (this.fieldHeight - 1 || 1);
       this.worldYs[y] = this.fieldBounds.y + v * this.fieldBounds.h;
+      this.fieldCellYs[y] = clamp(
+        Math.floor((this.worldYs[y] - this.fieldBounds.y) / this.fieldGridCellSize),
+        0,
+        this.fieldGridRows - 1,
+      );
     }
 
     this.backgroundGradient = this.ctx.createRadialGradient(
@@ -1250,20 +1290,76 @@ class CapsuleFerrofluid {
       this.lastTimestamp = timestamp;
     }
 
+    const frameStartMs = performance.now();
     const dt = clamp((timestamp - this.lastTimestamp) / 1000, 0, 0.033);
     this.lastTimestamp = timestamp;
 
     this.time += dt;
     this.accumulator = Math.min(this.accumulator + dt, 0.15);
+    let stepCount = 0;
+    let stepMsTotal = 0;
 
     while (this.accumulator >= this.fixedStep) {
+      const stepStartMs = performance.now();
       this.step(this.fixedStep);
+      stepMsTotal += performance.now() - stepStartMs;
+      stepCount += 1;
       this.accumulator -= this.fixedStep;
     }
 
     this.render();
+    const frameMs = performance.now() - frameStartMs;
+    const stepMs = stepCount > 0 ? stepMsTotal / stepCount : 0;
+    this.recordPerformance(frameMs, stepMs, timestamp);
 
     requestAnimationFrame((next) => this.tick(next));
+  }
+
+  recordPerformance(frameMs, stepMs, timestamp) {
+    const perf = this.perf;
+    const alpha = 0.12;
+    const smooth = (current, sample) => (current <= 0 ? sample : current + (sample - current) * alpha);
+    perf.frameMsAvg = smooth(perf.frameMsAvg, frameMs);
+    perf.stepMsAvg = smooth(perf.stepMsAvg, stepMs);
+    perf.fieldMsAvg = smooth(perf.fieldMsAvg, perf.fieldMsLast || 0);
+    perf.shadeMsAvg = smooth(perf.shadeMsAvg, perf.shadeMsLast || 0);
+    perf.drawMsAvg = smooth(perf.drawMsAvg, perf.drawMsLast || 0);
+    perf.fpsAvg = perf.frameMsAvg > 0.001 ? 1000 / perf.frameMsAvg : 0;
+    this.updatePerformanceHud(timestamp);
+  }
+
+  updatePerformanceHud(timestamp) {
+    const perf = this.perf;
+    if (timestamp - perf.lastHudUpdateMs < 220) {
+      return;
+    }
+    perf.lastHudUpdateMs = timestamp;
+    const setText = (el, text) => {
+      if (el) {
+        el.textContent = text;
+      }
+    };
+    setText(this.perfEls.fps, perf.fpsAvg.toFixed(1));
+    setText(this.perfEls.stepMs, perf.stepMsAvg.toFixed(2));
+    setText(this.perfEls.fieldMs, perf.fieldMsAvg.toFixed(2));
+    setText(this.perfEls.shadeMs, perf.shadeMsAvg.toFixed(2));
+    setText(this.perfEls.drawMs, perf.drawMsAvg.toFixed(2));
+
+    let bottleneckLabel = "step";
+    let bottleneckMs = perf.stepMsAvg;
+    if (perf.fieldMsAvg > bottleneckMs) {
+      bottleneckLabel = "field build";
+      bottleneckMs = perf.fieldMsAvg;
+    }
+    if (perf.shadeMsAvg > bottleneckMs) {
+      bottleneckLabel = "field shading";
+      bottleneckMs = perf.shadeMsAvg;
+    }
+    if (perf.drawMsAvg > bottleneckMs) {
+      bottleneckLabel = "draw/composite";
+      bottleneckMs = perf.drawMsAvg;
+    }
+    setText(this.perfEls.bottleneck, `Bottleneck: ${bottleneckLabel} (${bottleneckMs.toFixed(2)} ms)`);
   }
 
   step(dt) {
@@ -1515,8 +1611,9 @@ class CapsuleFerrofluid {
       (isInOutDrive ? 0.68 + pulseDriveShaped * 0.62 : 0.96) *
       restTensionDamp;
 
+    const driverTravel = isInOutDrive ? this.scale * clamp(this.params.driverTravel, 0, 0.08) : 0;
     this.magnetX = this.magnetBaseX;
-    this.magnetY = this.magnetBaseY;
+    this.magnetY = this.magnetBaseY + (0.5 - pulseDrive) * driverTravel;
     this.pulseState = pulseDrive;
     const pulseDelta = Math.abs(pulseDrive - this.prevPulseDrive);
     this.prevPulseDrive = pulseDrive;
@@ -1712,13 +1809,13 @@ class CapsuleFerrofluid {
   }
 
   renderField() {
+    const fieldStartMs = performance.now();
     const width = this.fieldWidth;
     const height = this.fieldHeight;
     const count = this.params.particleCount;
     const px = this.px;
     const py = this.py;
     const pw = this.pw;
-    const isolatedParticles = this.isolatedParticles;
     const gridHeads = this.fieldGridHeads;
     const gridNext = this.fieldGridNext;
     const gridCols = this.fieldGridCols;
@@ -1726,6 +1823,11 @@ class CapsuleFerrofluid {
     const invGridCellSize = 1 / this.fieldGridCellSize;
     const gridOriginX = this.fieldBounds.x;
     const gridOriginY = this.fieldBounds.y;
+    const cellXs = this.fieldCellXs;
+    const cellYs = this.fieldCellYs;
+    const gaussLut = this.gaussLut;
+    const gaussLutSize = this.gaussLutSize;
+    const gaussLutScale = gaussLutSize * this.invInfluenceRadiusSq;
 
     gridHeads.fill(-1);
     for (let i = 0; i < count; i += 1) {
@@ -1741,13 +1843,12 @@ class CapsuleFerrofluid {
     let pointer = 0;
     for (let y = 0; y < height; y += 1) {
       const worldY = this.worldYs[y];
-      const cellY = clamp(Math.floor((worldY - gridOriginY) * invGridCellSize), 0, gridRows - 1);
+      const cellY = cellYs[y];
 
       for (let x = 0; x < width; x += 1) {
         const worldX = this.worldXs[x];
-        const cellX = clamp(Math.floor((worldX - gridOriginX) * invGridCellSize), 0, gridCols - 1);
+        const cellX = cellXs[x];
         let fieldValue = 0;
-        let isolatedValue = 0;
 
         for (let gy = Math.max(0, cellY - 1); gy <= Math.min(gridRows - 1, cellY + 1); gy += 1) {
           const rowOffset = gy * gridCols;
@@ -1758,14 +1859,12 @@ class CapsuleFerrofluid {
               const dy = worldY - py[particleIndex];
               const distSq = dx * dx + dy * dy;
               if (distSq <= this.influenceRadiusSq) {
-                const contribution = Math.exp(-distSq * this.invSigma2) * pw[particleIndex];
-                fieldValue += contribution;
-                if (isolatedParticles[particleIndex] === 1) {
-                  const detachedWeight = smoothstep(0.82, 0.99, this.isolationAlpha[particleIndex]);
-                  if (detachedWeight > 0.001) {
-                    isolatedValue += contribution * detachedWeight;
-                  }
-                }
+                const lutPos = distSq * gaussLutScale;
+                const lutIndex = Math.min(gaussLutSize - 1, lutPos | 0);
+                const lutFrac = lutPos - lutIndex;
+                const gaussian =
+                  gaussLut[lutIndex] + (gaussLut[lutIndex + 1] - gaussLut[lutIndex]) * lutFrac;
+                fieldValue += gaussian * pw[particleIndex];
               }
               particleIndex = gridNext[particleIndex];
             }
@@ -1773,11 +1872,12 @@ class CapsuleFerrofluid {
         }
 
         this.fieldValues[pointer] = fieldValue;
-        this.fieldIsolated[pointer] = isolatedValue;
         pointer += 1;
       }
     }
 
+    const fieldBuildMs = performance.now() - fieldStartMs;
+    const shadeStartMs = performance.now();
     const data = this.fieldImageData.data;
     pointer = 0;
     const renderQualityNorm = clamp((this.params.renderQuality - 0.6) / (2.4 - 0.6), 0, 1);
@@ -1843,7 +1943,6 @@ class CapsuleFerrofluid {
       for (let x = 0; x < width; x += 1) {
         const index = y * width + x;
         const value = this.fieldValues[index];
-        const isolatedValue = this.fieldIsolated[index];
 
         const x0 = Math.max(0, x - 1);
         const x1 = Math.min(width - 1, x + 1);
@@ -1881,25 +1980,14 @@ class CapsuleFerrofluid {
         );
         const alphaBase = alphaBaseSoft * 0.34 + alphaBaseTight * 0.66;
         const alphaMain = Math.pow(alphaBase, 1.24 - lowQuality * 0.2);
-        // Isolated-droplet pass only: detached particles can appear without edge circle artifacts.
-        const isolatedSeed = 0;
-        const nearMain = smoothstep(this.isoLevel - 0.68, this.isoLevel + 0.34, alphaField);
-        const alphaDroplet = isolatedSeed * (1 - nearMain) * 0.16;
-        const dropletBlend = clamp(alphaDroplet / Math.max(0.0001, alphaMain + alphaDroplet), 0, 1);
-        let coverage = clamp(alphaMain + alphaDroplet, 0, 1);
+        let coverage = clamp(alphaMain, 0, 1);
         const coverageTight = smoothstep(0.03, 0.97, coverage);
         coverage = coverage * 0.34 + coverageTight * 0.66;
         const edgeAlpha = smoothstep(0.012, 0.11, coverage);
         const coreOpacity = smoothstep(0.15, 0.31, coverage);
         let alpha = clamp(edgeAlpha * (0.46 + coreOpacity * 0.54), 0, 1);
-        if (dropletBlend > 0.001) {
-          const detachedEdge = smoothstep(0.24, 0.76, coverage);
-          const detachedCore = smoothstep(0.32, 0.9, coverage);
-          const detachedShape = detachedEdge * 0.45 + detachedCore * 0.55;
-          alpha *= 1 - dropletBlend * (1 - detachedShape);
-        }
         const coreBoost = smoothstep(this.isoLevel + 0.22, this.isoLevel + 1.08, smoothValue);
-        alpha = clamp(alpha + coreBoost * (0.08 + lowQuality * 0.16) * (1 - dropletBlend * 0.6), 0, 1);
+        alpha = clamp(alpha + coreBoost * (0.08 + lowQuality * 0.16), 0, 1);
 
         if (alpha <= 0.001) {
           data[pointer] = 0;
@@ -2162,7 +2250,6 @@ class CapsuleFerrofluid {
           0.86,
           alphaMain * 0.56 + coverage * 0.18 + rimSpecBias * 0.78,
         );
-        const detachedSpecDamp = 1 - dropletBlend * 0.62;
         const coreHighlightDamp =
           1 - smoothstep(0.44, 0.98, body) * (0.36 + ambientStrength * 0.28);
         const clusterHighlightDamp = 1 - smoothstep(0.62, 0.98, alphaMain) * 0.26;
@@ -2192,7 +2279,6 @@ class CapsuleFerrofluid {
           (pointSpecular * 220 + pointSpecularTight * 760 + fresnel * (18 + lightPower * 56)) *
           (0.24 + edgeDensity * 0.76) *
           specEdgeMask *
-          detachedSpecDamp *
           centerSpecDamp *
           coreVolumeDamp *
           reflectivity *
@@ -2207,7 +2293,6 @@ class CapsuleFerrofluid {
           sideLightStrength *
           (0.24 + reflectivity * 0.76) *
           specEdgeMask *
-          detachedSpecDamp *
           centerSpecDamp *
           coreVolumeDamp *
           highlightDamp *
@@ -2221,8 +2306,7 @@ class CapsuleFerrofluid {
           (0.34 + reflectivity * 0.66) *
           specEdgeMask *
           centerSpecDamp *
-          coreVolumeDamp *
-          detachedSpecDamp;
+          coreVolumeDamp;
         const ft = clamp(nz, 0, 1);
         const iridescenceT = (1 - ft) * 3.6 + (1 - pointHalf) * 2.1 + body * 0.35;
         const iridescenceR = 0.5 + 0.5 * Math.cos(TAU * (iridescenceT + 0.0));
@@ -2242,7 +2326,6 @@ class CapsuleFerrofluid {
           (0.16 + lightPower * 0.54) *
           188 *
           specEdgeMask *
-          detachedSpecDamp *
           iridescenceStrength;
         const neutralBaseR = tone * 0.038;
         const neutralBaseG = tone * 0.043;
@@ -2283,7 +2366,6 @@ class CapsuleFerrofluid {
           occlusion *
           hdriBoost *
           (0.46 + specEdgeMask * 0.54) *
-          detachedSpecDamp *
           reflectivity *
           envReflectionGain *
           highlightDamp *
@@ -2349,6 +2431,8 @@ class CapsuleFerrofluid {
     }
 
     this.fieldCtx.putImageData(this.fieldImageData, 0, 0);
+    this.perf.fieldMsLast = fieldBuildMs;
+    this.perf.shadeMsLast = performance.now() - shadeStartMs;
   }
 
   render() {
@@ -2370,11 +2454,13 @@ class CapsuleFerrofluid {
 
     this.drawCapsuleShadow();
     this.renderField();
+    const drawStartMs = performance.now();
     this.drawFluid();
     if (this.params.viewMagnet) {
       this.drawMagnet();
     }
     this.drawCapsuleGlass();
+    this.perf.drawMsLast = performance.now() - drawStartMs;
     ctx.restore();
   }
 
