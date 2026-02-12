@@ -23,6 +23,7 @@ const PROFILE_NUMERIC_KEYS = [
   "pointLightIntensity",
   "sideLightStrength",
   "envLightStrength",
+  "environmentStrength",
   "pointLightOffsetX",
   "pointLightOffsetY",
   "exposure",
@@ -46,6 +47,7 @@ const PROFILE_BOOLEAN_KEYS = [
   "audioReactive",
   "enableOrbitDrag",
   "useHdriReflections",
+  "showEnvironment",
 ];
 
 const PROFILE_STRING_KEYS = ["driveMode", "fluidColorHex", "pointLightColorHex"];
@@ -131,9 +133,11 @@ class CapsuleFerrofluid {
       blobCohesion: 0.0,
       pointLightColorHex: "#ff0000",
       useHdriReflections: true,
+      showEnvironment: true,
       pointLightIntensity: 2.2,
       sideLightStrength: 2.5,
       envLightStrength: 1.2,
+      environmentStrength: 0.88,
       pointLightOffsetX: -0.25,
       pointLightOffsetY: -0.47,
       exposure: 1.06,
@@ -1197,6 +1201,7 @@ class CapsuleFerrofluid {
       id === "pointLightIntensity" ||
       id === "sideLightStrength" ||
       id === "envLightStrength" ||
+      id === "environmentStrength" ||
       id === "pointLightOffsetX" ||
       id === "pointLightOffsetY" ||
       id === "exposure" ||
@@ -1296,6 +1301,7 @@ class CapsuleFerrofluid {
       { id: "audioReactive", key: "audioReactive" },
       { id: "enableOrbitDrag", key: "enableOrbitDrag" },
       { id: "useHdriReflections", key: "useHdriReflections" },
+      { id: "showEnvironment", key: "showEnvironment" },
     ];
 
     for (const control of checkboxControls) {
@@ -2930,8 +2936,13 @@ class CapsuleFerrofluid {
     const ctx = this.ctx;
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(0, 0, this.width, this.height);
+    if (this.params.showEnvironment) {
+      this.drawWhiteRoom();
+      this.drawEnvironmentLight();
+    } else {
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, this.width, this.height);
+    }
 
     ctx.save();
     if (this.cameraZoom !== 1) {
@@ -2980,14 +2991,18 @@ class CapsuleFerrofluid {
   }
 
   drawEnvironmentLight() {
+    const envStrength = clamp(this.params.environmentStrength, 0, 1.5);
+    if (envStrength < 0.01) {
+      return;
+    }
     const r = Math.round(this.pointLightColor[0] * 255);
     const g = Math.round(this.pointLightColor[1] * 255);
     const b = Math.round(this.pointLightColor[2] * 255);
-    const intensity = Math.max(0, this.params.pointLightIntensity);
+    const intensity = Math.max(0, this.params.pointLightIntensity) * envStrength;
     const lightX = this.pointLightX + this.viewOffsetX;
     const lightY = this.pointLightY + this.viewOffsetY;
-    const coreAlpha = clamp(0.14 * intensity, 0, 0.32);
-    const midAlpha = clamp(0.05 * intensity, 0, 0.14);
+    const coreAlpha = clamp(0.12 * intensity, 0, 0.3);
+    const midAlpha = clamp(0.04 * intensity, 0, 0.12);
 
     const glow = this.ctx.createRadialGradient(
       lightX,
@@ -3020,6 +3035,7 @@ class CapsuleFerrofluid {
 
   drawWhiteRoom() {
     const ctx = this.ctx;
+    const envStrength = clamp(this.params.environmentStrength, 0, 1.5);
 
     if (this.hdriWidth > 1 && this.hdriHeight > 1) {
       const yawNorm = clamp((this.params.cameraYaw || 0) / 24, -1, 1);
@@ -3043,6 +3059,7 @@ class CapsuleFerrofluid {
       }
 
       ctx.save();
+      ctx.globalAlpha = clamp(0.12 + envStrength * 0.88, 0, 1);
       if (sourceX + sourceWidth <= this.hdriWidth) {
         ctx.drawImage(
           this.hdriCanvas,
@@ -3082,13 +3099,23 @@ class CapsuleFerrofluid {
           this.height,
         );
       }
+      ctx.globalAlpha = 1;
 
       const topWash = ctx.createLinearGradient(0, 0, 0, this.height);
-      topWash.addColorStop(0, "rgba(255, 255, 255, 0.08)");
-      topWash.addColorStop(0.56, "rgba(255, 255, 255, 0.02)");
-      topWash.addColorStop(1, "rgba(0, 0, 0, 0.12)");
+      topWash.addColorStop(0, `rgba(255, 255, 255, ${0.05 + envStrength * 0.05})`);
+      topWash.addColorStop(0.56, `rgba(255, 255, 255, ${0.01 + envStrength * 0.02})`);
+      topWash.addColorStop(1, `rgba(0, 0, 0, ${0.08 + envStrength * 0.08})`);
       ctx.fillStyle = topWash;
       ctx.fillRect(0, 0, this.width, this.height);
+
+      if (envStrength < 1) {
+        ctx.fillStyle = `rgba(0, 0, 0, ${clamp((1 - envStrength) * 0.68, 0, 0.68)})`;
+        ctx.fillRect(0, 0, this.width, this.height);
+      } else if (envStrength > 1) {
+        ctx.globalCompositeOperation = "screen";
+        ctx.fillStyle = `rgba(255, 255, 255, ${clamp((envStrength - 1) * 0.24, 0, 0.12)})`;
+        ctx.fillRect(0, 0, this.width, this.height);
+      }
       ctx.restore();
       return;
     }
@@ -3096,6 +3123,14 @@ class CapsuleFerrofluid {
     ctx.save();
     ctx.fillStyle = this.backgroundGradient;
     ctx.fillRect(0, 0, this.width, this.height);
+    if (envStrength < 1) {
+      ctx.fillStyle = `rgba(0, 0, 0, ${clamp((1 - envStrength) * 0.72, 0, 0.72)})`;
+      ctx.fillRect(0, 0, this.width, this.height);
+    } else if (envStrength > 1) {
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillStyle = `rgba(255, 255, 255, ${clamp((envStrength - 1) * 0.24, 0, 0.14)})`;
+      ctx.fillRect(0, 0, this.width, this.height);
+    }
     ctx.restore();
   }
 
@@ -3249,6 +3284,7 @@ class CapsuleFerrofluid {
     if (plexiFilmStrength > 0.001 && this.fluidShadowCtx) {
       const filmWidth = this.fluidShadowCanvas.width;
       const filmHeight = this.fluidShadowCanvas.height;
+      const diffusion = smoothstep(0, 1, plexiFilmDiffusion);
       const filmScaleX = filmWidth / Math.max(1, this.fieldBounds.w);
       const filmScaleY = filmHeight / Math.max(1, this.fieldBounds.h);
       const filmLedX = (ledCenterX - (this.fieldBounds.x + fluidOffsetX)) * filmScaleX;
@@ -3274,18 +3310,19 @@ class CapsuleFerrofluid {
       );
       const filmAlpha = clamp(
         plexiFilmStrength *
-          (0.2 + ledIntensity * 0.26) *
-          (0.34 + sideLightStrength * 0.66),
+          (0.16 + ledIntensity * 0.24) *
+          (0.3 + sideLightStrength * 0.7) *
+          (0.5 + diffusion * 0.75),
         0,
-        0.46,
+        0.62,
       );
 
       this.fluidShadowCtx.clearRect(0, 0, filmWidth, filmHeight);
       this.fluidShadowCtx.drawImage(this.fieldCanvas, 0, 0, filmWidth, filmHeight);
       this.fluidShadowCtx.globalCompositeOperation = "source-in";
       const filmRadius =
-        Math.max(filmWidth, filmHeight) * (0.28 + plexiFilmDiffusion * 0.56);
-      const filmCore = Math.max(1, filmRadius * (0.08 + plexiFilmDiffusion * 0.12));
+        Math.max(filmWidth, filmHeight) * (0.16 + diffusion * 1.12);
+      const filmCore = Math.max(1, filmRadius * (0.22 - diffusion * 0.18));
       const filmGradient = this.fluidShadowCtx.createRadialGradient(
         filmLedX,
         filmLedY,
@@ -3294,23 +3331,23 @@ class CapsuleFerrofluid {
         filmLedY,
         filmRadius,
       );
-      filmGradient.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, 0.86)`);
-      filmGradient.addColorStop(0.42, `rgba(${filmR}, ${filmG}, ${filmB}, 0.38)`);
-      filmGradient.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.06)`);
+      filmGradient.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, 0.92)`);
+      filmGradient.addColorStop(0.26, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.58 - diffusion * 0.12})`);
+      filmGradient.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.02 + diffusion * 0.12})`);
       this.fluidShadowCtx.fillStyle = filmGradient;
       this.fluidShadowCtx.fillRect(0, 0, filmWidth, filmHeight);
 
       const filmWash = this.fluidShadowCtx.createLinearGradient(0, 0, filmWidth, filmHeight);
-      filmWash.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.08 + plexiFilmDiffusion * 0.12})`);
-      filmWash.addColorStop(0.6, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.03 + plexiFilmDiffusion * 0.06})`);
+      filmWash.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.05 + diffusion * 0.24})`);
+      filmWash.addColorStop(0.6, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.01 + diffusion * 0.1})`);
       filmWash.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.01)`);
       this.fluidShadowCtx.fillStyle = filmWash;
       this.fluidShadowCtx.fillRect(0, 0, filmWidth, filmHeight);
       this.fluidShadowCtx.globalCompositeOperation = "source-over";
 
       const filmBlur = Math.max(
-        0.8,
-        this.scale * (0.005 + plexiFilmDiffusion * 0.02) * (0.72 + renderQualityNorm * 0.28),
+        0.6,
+        this.scale * (0.002 + diffusion * 0.044) * (0.68 + renderQualityNorm * 0.34),
       );
       this.ctx.save();
       this.ctx.globalCompositeOperation = "screen";
@@ -3335,6 +3372,45 @@ class CapsuleFerrofluid {
         this.fieldBounds.w,
         this.fieldBounds.h,
       );
+      this.ctx.restore();
+
+      const frontHaloRadius = Math.max(rx, ry) * (0.28 + diffusion * 1.55);
+      const frontHaloCore = Math.max(1, frontHaloRadius * (0.05 + (1 - diffusion) * 0.18));
+      const frontHaloAlpha = clamp(filmAlpha * (0.12 + diffusion * 0.44), 0, 0.42);
+      this.ctx.save();
+      this.ctx.globalCompositeOperation = "screen";
+      this.ctx.globalAlpha = frontHaloAlpha;
+      const frontHalo = this.ctx.createRadialGradient(
+        ledCenterX,
+        ledCenterY,
+        frontHaloCore,
+        ledCenterX,
+        ledCenterY,
+        frontHaloRadius,
+      );
+      frontHalo.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, 0.96)`);
+      frontHalo.addColorStop(0.28, `rgba(${filmR}, ${filmG}, ${filmB}, 0.32)`);
+      frontHalo.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.02)`);
+      this.ctx.fillStyle = frontHalo;
+      this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
+      this.ctx.restore();
+
+      const sweepAlpha = clamp(frontHaloAlpha * (0.44 + diffusion * 0.5), 0, 0.24);
+      this.ctx.save();
+      this.ctx.globalCompositeOperation = "soft-light";
+      this.ctx.globalAlpha = sweepAlpha;
+      this.ctx.filter = `blur(${Math.max(0.8, this.scale * (0.004 + diffusion * 0.01))}px)`;
+      const sweep = this.ctx.createLinearGradient(
+        ledCenterX - ledDirX * rx * 1.25,
+        ledCenterY - ledDirY * ry * 1.25,
+        ledCenterX + ledDirX * rx * 1.25,
+        ledCenterY + ledDirY * ry * 1.25,
+      );
+      sweep.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, 0.04)`);
+      sweep.addColorStop(0.5, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.16 + diffusion * 0.18})`);
+      sweep.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.03)`);
+      this.ctx.fillStyle = sweep;
+      this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
       this.ctx.restore();
     }
 

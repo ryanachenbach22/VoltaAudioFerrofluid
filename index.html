@@ -306,6 +306,17 @@
           <span>Use HDR reflections</span>
         </label>
 
+        <label class="checkbox-row" for="showEnvironment">
+          <input id="showEnvironment" type="checkbox" checked />
+          <span>Show HDR environment</span>
+        </label>
+
+        <label for="environmentStrength">Environment strength</label>
+        <div class="control-row">
+          <input id="environmentStrength" type="range" min="0" max="1.5" step="0.01" value="0.88" />
+          <output id="environmentStrength-value">0.88</output>
+        </div>
+
         <label for="pointLightColor">LED color</label>
         <div class="control-row">
           <input id="pointLightColor" type="color" value="#ff0000" />
