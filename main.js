@@ -85,6 +85,8 @@ class CapsuleFerrofluid {
       reflectionClarity: 1.35,
       impactHighlights: 1.3,
       iridescenceStrength: 0.0,
+      plexiFilmStrength: 0.24,
+      plexiFilmDiffusion: 0.42,
       audioReactive: false,
       driveMode: "gate",
       audioSensitivity: 1.37,
@@ -855,6 +857,8 @@ class CapsuleFerrofluid {
       "reflectionClarity",
       "impactHighlights",
       "iridescenceStrength",
+      "plexiFilmStrength",
+      "plexiFilmDiffusion",
       "audioSensitivity",
       "audioSmoothing",
       "audioThreshold",
@@ -895,6 +899,8 @@ class CapsuleFerrofluid {
           id === "reflectionClarity" ||
           id === "impactHighlights" ||
           id === "iridescenceStrength" ||
+          id === "plexiFilmStrength" ||
+          id === "plexiFilmDiffusion" ||
           id === "audioSensitivity" ||
           id === "audioSmoothing" ||
           id === "audioThreshold"
@@ -2729,6 +2735,8 @@ class CapsuleFerrofluid {
     const fastShadowMode = this.params.renderQuality < 1.0;
     const sideLightStrength = clamp(this.params.sideLightStrength, 0, 2.5);
     const ledIntensity = Math.max(0, this.params.pointLightIntensity);
+    const plexiFilmStrength = clamp(this.params.plexiFilmStrength, 0, 1.2);
+    const plexiFilmDiffusion = clamp(this.params.plexiFilmDiffusion, 0, 1);
     const ledCenterX = cx + fluidOffsetX + this.capsule.rx * this.params.pointLightOffsetX * 0.08;
     const ledCenterY = cy + fluidOffsetY + this.capsule.ry * this.params.pointLightOffsetY * 0.08;
     let ledDirX = this.params.pointLightOffsetX;
@@ -2841,6 +2849,98 @@ class CapsuleFerrofluid {
     this.ctx.ellipse(ledCenterX, ledCenterY, rx * 0.9, ry * 0.9, 0, 0, TAU);
     this.ctx.stroke();
     this.ctx.restore();
+
+    if (plexiFilmStrength > 0.001 && this.fluidShadowCtx) {
+      const filmWidth = this.fluidShadowCanvas.width;
+      const filmHeight = this.fluidShadowCanvas.height;
+      const filmScaleX = filmWidth / Math.max(1, this.fieldBounds.w);
+      const filmScaleY = filmHeight / Math.max(1, this.fieldBounds.h);
+      const filmLedX = (ledCenterX - (this.fieldBounds.x + fluidOffsetX)) * filmScaleX;
+      const filmLedY = (ledCenterY - (this.fieldBounds.y + fluidOffsetY)) * filmScaleY;
+      const filmBaseR = 132;
+      const filmBaseG = 142;
+      const filmBaseB = 170;
+      const ledTintMix = 0.66;
+      const filmR = clamp(
+        Math.round(filmBaseR * (1 - ledTintMix) + this.pointLightColor[0] * 255 * ledTintMix),
+        0,
+        255,
+      );
+      const filmG = clamp(
+        Math.round(filmBaseG * (1 - ledTintMix) + this.pointLightColor[1] * 255 * ledTintMix),
+        0,
+        255,
+      );
+      const filmB = clamp(
+        Math.round(filmBaseB * (1 - ledTintMix) + this.pointLightColor[2] * 255 * ledTintMix),
+        0,
+        255,
+      );
+      const filmAlpha = clamp(
+        plexiFilmStrength *
+          (0.2 + ledIntensity * 0.26) *
+          (0.34 + sideLightStrength * 0.66),
+        0,
+        0.46,
+      );
+
+      this.fluidShadowCtx.clearRect(0, 0, filmWidth, filmHeight);
+      this.fluidShadowCtx.drawImage(this.fieldCanvas, 0, 0, filmWidth, filmHeight);
+      this.fluidShadowCtx.globalCompositeOperation = "source-in";
+      const filmRadius =
+        Math.max(filmWidth, filmHeight) * (0.28 + plexiFilmDiffusion * 0.56);
+      const filmCore = Math.max(1, filmRadius * (0.08 + plexiFilmDiffusion * 0.12));
+      const filmGradient = this.fluidShadowCtx.createRadialGradient(
+        filmLedX,
+        filmLedY,
+        filmCore,
+        filmLedX,
+        filmLedY,
+        filmRadius,
+      );
+      filmGradient.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, 0.86)`);
+      filmGradient.addColorStop(0.42, `rgba(${filmR}, ${filmG}, ${filmB}, 0.38)`);
+      filmGradient.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.06)`);
+      this.fluidShadowCtx.fillStyle = filmGradient;
+      this.fluidShadowCtx.fillRect(0, 0, filmWidth, filmHeight);
+
+      const filmWash = this.fluidShadowCtx.createLinearGradient(0, 0, filmWidth, filmHeight);
+      filmWash.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.08 + plexiFilmDiffusion * 0.12})`);
+      filmWash.addColorStop(0.6, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.03 + plexiFilmDiffusion * 0.06})`);
+      filmWash.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.01)`);
+      this.fluidShadowCtx.fillStyle = filmWash;
+      this.fluidShadowCtx.fillRect(0, 0, filmWidth, filmHeight);
+      this.fluidShadowCtx.globalCompositeOperation = "source-over";
+
+      const filmBlur = Math.max(
+        0.8,
+        this.scale * (0.005 + plexiFilmDiffusion * 0.02) * (0.72 + renderQualityNorm * 0.28),
+      );
+      this.ctx.save();
+      this.ctx.globalCompositeOperation = "screen";
+      this.ctx.globalAlpha = filmAlpha;
+      this.ctx.filter = `blur(${filmBlur}px)`;
+      this.ctx.drawImage(
+        this.fluidShadowCanvas,
+        this.fieldBounds.x + fluidOffsetX,
+        this.fieldBounds.y + fluidOffsetY,
+        this.fieldBounds.w,
+        this.fieldBounds.h,
+      );
+      this.ctx.restore();
+
+      this.ctx.save();
+      this.ctx.globalCompositeOperation = "soft-light";
+      this.ctx.globalAlpha = filmAlpha * 0.55;
+      this.ctx.drawImage(
+        this.fluidShadowCanvas,
+        this.fieldBounds.x + fluidOffsetX,
+        this.fieldBounds.y + fluidOffsetY,
+        this.fieldBounds.w,
+        this.fieldBounds.h,
+      );
+      this.ctx.restore();
+    }
 
     this.ctx.restore();
   }
