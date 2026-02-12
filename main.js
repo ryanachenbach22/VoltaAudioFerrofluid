@@ -51,7 +51,7 @@ class CapsuleFerrofluid {
 
     this.params = {
       particleCount: 90,
-      magnetStrength: 900,
+      magnetStrength: 1200,
       magnetSize: 1.0,
       gravity: 52,
       renderQuality: 1.0,
@@ -1125,7 +1125,7 @@ class CapsuleFerrofluid {
     this.isolationLinkRadius = this.neighborRadius * 0.72;
     this.repulsionRadius = this.scale * 0.05;
     this.magnetRangeBase = this.scale * 0.5;
-    this.magnetClamp = 4200;
+    this.magnetClamp = 5200;
     this.maxSpeed = this.scale * 6.2;
 
     this.isoLevel = 1.68;
@@ -1589,6 +1589,18 @@ class CapsuleFerrofluid {
       aggressiveAudio && !this.params.manualPulse
         ? 1.28 + audioSignal.drive * 1.52 + audioSignal.impact * 0.72
         : 1;
+    const magnetStrengthNorm = clamp(this.params.magnetStrength / 2200, 0, 2.5);
+    // Magnetized-fluid model: under stronger field, apparent cohesion/tension rises.
+    // This lets the blob stretch rapidly without tearing into droplets as easily.
+    const fieldCoupling = clamp(
+      (magnetGate * magnetBoost - 0.05) *
+        (0.45 + pulseDriveShaped * 0.95) *
+        (0.55 + magnetStrengthNorm * 0.45),
+      0,
+      2.2,
+    );
+    const fieldTensionGain = 1 + fieldCoupling * 0.85;
+    const fieldRejoinGain = 1 + fieldCoupling * 0.75;
     const centerPullGainRaw = this.params.manualPulse
       ? 0.0015 + pulseDriveShaped * 0.52
       : isInOutDrive
@@ -1609,7 +1621,8 @@ class CapsuleFerrofluid {
       this.params.surfaceTension *
       densityScale *
       (isInOutDrive ? 0.68 + pulseDriveShaped * 0.62 : 0.96) *
-      restTensionDamp;
+      restTensionDamp *
+      fieldTensionGain;
 
     const driverTravel = isInOutDrive ? this.scale * clamp(this.params.driverTravel, 0, 0.08) : 0;
     this.magnetX = this.magnetBaseX;
@@ -1632,15 +1645,16 @@ class CapsuleFerrofluid {
       // Annular driver model: attract toward a ring radius rather than a center point.
       // This better matches large-diameter ring electromagnets behind a capsule.
       const ringRadius = this.scale * (0.055 + magnetSize * 0.088);
-      const ringBand = this.scale * (0.05 + magnetSize * 0.06);
+      const ringBand = this.scale * (0.075 + magnetSize * 0.11);
       const ringOffset = magnetDist - ringRadius;
       const ringCenterDamp = smoothstep(0.34, 0.9, magnetDist / Math.max(1, ringRadius));
       const detachedFactor = detachedFactorFor(i);
       const ringT = ringOffset / Math.max(1, ringBand);
       const ringFalloff = 1 / (1 + ringT * ringT);
-      const ringSpring = clamp(Math.abs(ringOffset) / Math.max(1, ringBand * 1.35), 0, 2.8);
+      const ringSpring = clamp(Math.abs(ringOffset) / Math.max(1, ringBand * 1.8), 0, 2.0);
       let magnetForce = this.params.magnetStrength * ringSpring * ringFalloff;
       magnetForce *= magnetGate * magnetBoost * audioBoost;
+      magnetForce *= 0.9 + fieldCoupling * 0.45;
       magnetForce *= 1 - detachedFactor * 0.42 * blobCohesionNorm;
       const dynamicMagnetClamp =
         this.magnetClamp *
@@ -1675,7 +1689,8 @@ class CapsuleFerrofluid {
           this.scale *
           (0.03 + pulseDriveShaped * 0.05) *
           detachedFactor *
-          cohesionRejoinScale;
+          cohesionRejoinScale *
+          fieldRejoinGain;
         ax += (comX - this.px[i]) * rejoinGain;
         ay += (comY - this.py[i]) * rejoinGain;
       }
@@ -1703,7 +1718,8 @@ class CapsuleFerrofluid {
           (0.001 + pulseDriveShaped * 0.018) *
           compactEdge *
           (0.02 + pulseDriveShaped * 0.98) *
-          ringCenterDamp;
+          ringCenterDamp *
+          (1 + fieldCoupling * 0.35);
         ax += (comX - this.px[i]) * compactionGain;
         ay += (comY - this.py[i]) * compactionGain;
       }
@@ -1720,12 +1736,13 @@ class CapsuleFerrofluid {
           this.scale *
           (0.026 + pulseDriveShaped * 0.022) *
           microStabilize *
-          cohesionMicroScale;
+          cohesionMicroScale *
+          fieldRejoinGain;
         ax += (comX - this.px[i]) * rejoinGain;
         ay += (comY - this.py[i]) * rejoinGain;
       }
 
-      ay += this.params.gravity * 1.8;
+      ay += this.params.gravity * 1.4;
 
       this.vx[i] += ax * dt;
       this.vy[i] += ay * dt;
@@ -2821,7 +2838,7 @@ class CapsuleFerrofluid {
   drawMagnet() {
     const magnetSize = clamp(this.params.magnetSize, 0.35, 5.0);
     const ringRadius = this.scale * (0.055 + magnetSize * 0.088);
-    const ringBand = this.scale * (0.05 + magnetSize * 0.06);
+    const ringBand = this.scale * (0.075 + magnetSize * 0.11);
     const outerRadius = ringRadius + ringBand * 0.5;
     const innerRadius = Math.max(this.scale * 0.01, ringRadius - ringBand * 0.5);
     const pulseMix = 0.2 + this.pulseState * 0.8;
