@@ -2122,8 +2122,9 @@ class CapsuleFerrofluid {
       const magnetDist = Math.sqrt(magnetDistSq);
       const invMagnetDist = 1 / magnetDist;
 
-      // Annular driver model: attract toward a ring radius rather than a center point.
-      // This better matches large-diameter ring electromagnets behind a capsule.
+      // Annular driver model: field peaks on a ring (voice-coil geometry).
+      // A weaker center pole term is blended in, so attraction can shift between
+      // center-dominant and ring-dominant regions without introducing true repulsion.
       const ringRadius = this.scale * (0.055 + magnetSize * 0.088);
       const ringBand = this.scale * (0.075 + magnetSize * 0.11);
       const ringOffset = magnetDist - ringRadius;
@@ -2140,14 +2141,31 @@ class CapsuleFerrofluid {
         this.magnetClamp *
         (1 + this.params.pulseAggression * pulseDrive * 0.32) *
         (aggressiveAudio ? 1.22 + audioSignal.drive * 0.68 : 1);
-      magnetForce = Math.min(magnetForce, dynamicMagnetClamp);
+      magnetForce = Math.min(magnetForce, dynamicMagnetClamp * 0.96);
 
-      // Direction toward ring centerline:
-      // - outside ring => pull inward (toward magnet center)
-      // - inside ring  => push outward (away from magnet center)
+      // Signed inward force toward the ring centerline:
+      // - outside ring => inward (toward magnet center)
+      // - inside ring  => outward (toward ring from center)
       const ringSign = ringOffset > 0 ? 1 : -1;
-      ax += (mx * invMagnetDist) * magnetForce * ringSign;
-      ay += (my * invMagnetDist) * magnetForce * ringSign;
+      const ringInwardForce = magnetForce * ringSign;
+
+      // Center pole piece leakage term (always inward), stronger at lower excursion.
+      const centerPoleRadius = Math.max(this.scale * 0.03, ringRadius * (0.36 + magnetSizeNorm * 0.16));
+      const centerPoleNorm = magnetDist / Math.max(1, centerPoleRadius);
+      const centerPoleFalloff = 1 / (1 + centerPoleNorm * centerPoleNorm);
+      const centerPoleBias = 0.12 + (1 - pulseDriveShaped) * 0.4;
+      const centerPoleForce =
+        this.params.magnetStrength *
+        centerPoleFalloff *
+        centerPoleBias *
+        magnetGate *
+        (0.84 + fieldCoupling * 0.22) *
+        (1 - detachedFactor * 0.28 * blobCohesionNorm);
+
+      let inwardMagnetForce = ringInwardForce + centerPoleForce;
+      inwardMagnetForce = clamp(inwardMagnetForce, -dynamicMagnetClamp * 0.92, dynamicMagnetClamp);
+      ax += (mx * invMagnetDist) * inwardMagnetForce;
+      ay += (my * invMagnetDist) * inwardMagnetForce;
 
       ax +=
         (comX - this.px[i]) *
