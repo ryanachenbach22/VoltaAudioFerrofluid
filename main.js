@@ -65,7 +65,7 @@ class CapsuleFerrofluid {
       density: 0.78,
       viscosity: 0.05,
       resistance: 0.94,
-      surfaceTension: 2.5,
+      surfaceTension: 3.0,
       blobCohesion: 0.95,
       pointLightColorHex: "#ff0000",
       useHdriReflections: true,
@@ -1434,6 +1434,11 @@ class CapsuleFerrofluid {
     const densityScale = this.params.density;
     const viscosityInput = clamp(this.params.viscosity, 0, 1.2);
     const viscosityStrength = Math.pow(viscosityInput, 1.85) * 2.4;
+    const blobCohesion = clamp(this.params.blobCohesion, 0, 8.0);
+    const blobCohesionNorm = blobCohesion / 8;
+    // Keep cohesion/tension strengthening independent from viscosity.
+    const baseCohesionGain = 1 + blobCohesionNorm * 2.15;
+    const baseSurfaceGain = 1 + blobCohesionNorm * 1.55;
     this.updatePointLightPosition();
     this.updateViewOffset();
 
@@ -1525,7 +1530,8 @@ class CapsuleFerrofluid {
           (ratio - this.params.clusterBalance) *
           this.params.cohesion *
           densityScale *
-          cohesionWeight;
+          cohesionWeight *
+          baseCohesionGain;
 
         if (dist < this.repulsionRadius) {
           const q = 1 - dist / this.repulsionRadius;
@@ -1576,8 +1582,6 @@ class CapsuleFerrofluid {
       this.isolationAlpha[i] += (target - this.isolationAlpha[i]) * clamp(22 * dt, 0, 1);
       this.isolatedParticles[i] = 0;
     }
-    const blobCohesion = clamp(this.params.blobCohesion, 0, 8.0);
-    const blobCohesionNorm = blobCohesion / 8;
     const cohesionRejoinScale = 0.4 + blobCohesionNorm * 2.8;
     const cohesionMicroScale = 0.52 + blobCohesionNorm * 0.78;
     const cohesionMicroDragScale = 0.75 + blobCohesionNorm * 0.45;
@@ -1689,7 +1693,8 @@ class CapsuleFerrofluid {
       densityScale *
       (isInOutDrive ? 0.68 + pulseDriveShaped * 0.62 : 0.96) *
       restTensionDamp *
-      fieldTensionGain;
+      fieldTensionGain *
+      baseSurfaceGain;
 
     const driverTravel = isInOutDrive ? this.scale * clamp(this.params.driverTravel, 0, 0.08) : 0;
     this.magnetX = this.magnetBaseX;
