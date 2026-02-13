@@ -3390,8 +3390,6 @@ class CapsuleFerrofluid {
       );
 
       this.fluidShadowCtx.clearRect(0, 0, filmWidth, filmHeight);
-      this.fluidShadowCtx.drawImage(this.fieldCanvas, 0, 0, filmWidth, filmHeight);
-      this.fluidShadowCtx.globalCompositeOperation = "source-in";
       const filmRadius =
         Math.max(filmWidth, filmHeight) * (0.16 + diffusion * 1.12);
       const filmCore = Math.max(1, filmRadius * (0.22 - diffusion * 0.18));
@@ -3414,6 +3412,14 @@ class CapsuleFerrofluid {
       filmWash.addColorStop(0.6, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.01 + diffusion * 0.1})`);
       filmWash.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.01)`);
       this.fluidShadowCtx.fillStyle = filmWash;
+      this.fluidShadowCtx.fillRect(0, 0, filmWidth, filmHeight);
+
+      const paneVeil = this.fluidShadowCtx.createLinearGradient(0, filmHeight * 0.04, 0, filmHeight * 0.96);
+      paneVeil.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.06 + diffusion * 0.2})`);
+      paneVeil.addColorStop(0.52, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.02 + diffusion * 0.08})`);
+      paneVeil.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.01)`);
+      this.fluidShadowCtx.globalCompositeOperation = "screen";
+      this.fluidShadowCtx.fillStyle = paneVeil;
       this.fluidShadowCtx.fillRect(0, 0, filmWidth, filmHeight);
       this.fluidShadowCtx.globalCompositeOperation = "source-over";
 
