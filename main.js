@@ -1575,8 +1575,8 @@ class CapsuleFerrofluid {
     this.ctx.imageSmoothingQuality = "high";
 
     const side = Math.min(this.width, this.height);
-    const rx = side * 0.24;
-    const ry = side * 0.33;
+    const rx = side * 0.26;
+    const ry = side * 0.355;
 
     this.capsule = {
       cx: this.width * 0.5,
