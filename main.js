@@ -2063,22 +2063,23 @@ class CapsuleFerrofluid {
 
     const idleAudio = this.params.audioReactive && !audioSignal.active && !this.params.manualPulse;
     const transientKick = this.params.audioReactive
-      ? clamp(audioSignal.transient * 0.95 + audioSignal.impact * 0.55, 0, 1.4)
+      ? clamp(audioSignal.transient * 1.25 + audioSignal.impact * 0.9, 0, 2.2)
       : 0;
-    // Keep the field mostly event-driven so the blob gets jostled instead of held.
-    const envelopeHold = this.params.manualPulse ? pulseDriveShaped : pulseDriveShaped * (isInOutDrive ? 0.22 : 0.3);
-    const magnetGate = clamp(envelopeHold + pulseDelta * 9.5 + transientKick * 0.7, 0, 1.35);
+    // Emphasize on/off contrast: weak hold + strong transient jolt.
+    const envelopeHold = this.params.manualPulse ? pulseDriveShaped : pulseDriveShaped * (isInOutDrive ? 0.12 : 0.16);
+    const pulseJolt = clamp(pulseDelta * 18 + transientKick * 1.15 + (audioSignal.gate ? 0.12 : 0), 0, 2.4);
+    const magnetGate = clamp(envelopeHold + pulseJolt, 0, 2.4);
     const magnetBoost =
-      1 + this.params.pulseAggression * (0.62 + pulseDriveShaped * 1.15) * pulseDriveShaped;
+      1 + this.params.pulseAggression * (0.56 + pulseDriveShaped * 1.22 + pulseJolt * 0.35) * pulseDriveShaped;
     const audioBoost =
       aggressiveAudio && !this.params.manualPulse
-        ? 1.28 + audioSignal.drive * 1.52 + audioSignal.impact * 0.72
+        ? 1.22 + audioSignal.drive * 1.9 + audioSignal.impact * 1.15
         : 1;
     const magnetStrengthNorm = clamp(this.params.magnetStrength / 2200, 0, 2.5);
     // Magnetized-fluid model: under stronger field, apparent cohesion/tension rises.
     // This lets the blob stretch rapidly without tearing into droplets as easily.
     const fieldCoupling = clamp(
-      (magnetGate * magnetBoost - 0.05) *
+      (magnetGate * magnetBoost * 1.12 - 0.05) *
         (0.45 + pulseDriveShaped * 0.95) *
         (0.55 + magnetStrengthNorm * 0.45),
       0,
@@ -2090,9 +2091,9 @@ class CapsuleFerrofluid {
       ? 0.0015 + pulseDriveShaped * 0.52
       : isInOutDrive
         ? idleAudio
-          ? 0.0015
-          : 0.008 + pulseDriveShaped * 0.3
-        : 0.045 + pulseDriveShaped * 0.42;
+          ? 0.0008
+          : 0.004 + pulseDriveShaped * 0.18
+        : 0.03 + pulseDriveShaped * 0.35;
     const centerPullGain = Math.max(0, centerPullGainRaw * (1 - restRelax * 0.92));
     const centerPullSizeDamp = 1 - magnetSizeNorm * (0.42 + pulseDriveShaped * 0.28);
     const restTensionDamp = this.params.manualPulse
@@ -2141,13 +2142,13 @@ class CapsuleFerrofluid {
       const ringFalloff = 1 / (1 + ringT * ringT);
       const ringSpring = clamp(Math.abs(ringOffset) / Math.max(1, ringBand * 2.8), 0, 1.2);
       let magnetForce = this.params.magnetStrength * ringSpring * ringFalloff;
-      magnetForce *= 0.58;
+      magnetForce *= 0.9 + pulseJolt * 0.35;
       magnetForce *= magnetGate * magnetBoost * audioBoost;
       magnetForce *= 0.9 + fieldCoupling * 0.45;
       magnetForce *= 1 - detachedFactor * 0.42 * blobCohesionNorm;
       const dynamicMagnetClamp =
         this.magnetClamp *
-        (1 + this.params.pulseAggression * pulseDrive * 0.32) *
+        (1 + this.params.pulseAggression * pulseDrive * 0.32 + pulseJolt * 0.4) *
         (aggressiveAudio ? 1.22 + audioSignal.drive * 0.68 : 1);
       magnetForce = Math.min(magnetForce, dynamicMagnetClamp * 0.96);
 
@@ -2161,7 +2162,7 @@ class CapsuleFerrofluid {
       const centerPoleRadius = Math.max(this.scale * 0.03, ringRadius * (0.36 + magnetSizeNorm * 0.16));
       const centerPoleNorm = magnetDist / Math.max(1, centerPoleRadius);
       const centerPoleFalloff = 1 / (1 + centerPoleNorm * centerPoleNorm);
-      const centerPoleBias = 0.02 + (1 - pulseDriveShaped) * 0.05;
+      const centerPoleBias = 0.008 + (1 - pulseDriveShaped) * 0.02;
       const centerPoleForce =
         this.params.magnetStrength *
         centerPoleFalloff *
