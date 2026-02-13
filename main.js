@@ -2127,7 +2127,7 @@ class CapsuleFerrofluid {
       const mx = this.magnetX - this.px[i];
       const my = this.magnetY - this.py[i];
       // Simulate magnet standoff behind the capsule wall to avoid hard imprinting.
-      const magnetStandoff = this.scale * (0.22 + magnetSizeNorm * 0.04);
+      const magnetStandoff = this.scale * (0.34 + magnetSizeNorm * 0.16);
       const magnetDistSq = mx * mx + my * my + magnetStandoff * magnetStandoff + 0.0001;
       const magnetDist = Math.sqrt(magnetDistSq);
       const invMagnetDist = 1 / magnetDist;
@@ -2136,14 +2136,18 @@ class CapsuleFerrofluid {
       // A weaker center pole term is blended in, so attraction can shift between
       // center-dominant and ring-dominant regions without introducing true repulsion.
       const ringRadius = this.scale * (0.11 + magnetSize * 0.115);
-      const ringBand = this.scale * (0.145 + magnetSize * 0.105);
+      const ringBand = this.scale * (0.18 + magnetSize * 0.14);
       const ringOffset = magnetDist - ringRadius;
-      const ringCenterDamp = smoothstep(0.34, 0.9, magnetDist / Math.max(1, ringRadius));
+      const ringCenterDamp = smoothstep(0.22, 0.96, magnetDist / Math.max(1, ringRadius));
       const detachedFactor = detachedFactorFor(i);
-      const ringT = ringOffset / Math.max(1, ringBand);
-      const ringFalloff = 1 / (1 + ringT * ringT);
-      const ringSpring = clamp(Math.abs(ringOffset) / Math.max(1, ringBand * 2.8), 0, 1.2);
-      let magnetForce = this.params.magnetStrength * ringSpring * ringFalloff;
+      const ringT = ringOffset / Math.max(1, ringBand * (1.8 + (1 - pulseDriveShaped) * 0.9));
+      const ringLobe = Math.exp(-(ringT * ringT));
+      const broadNorm = magnetDist / Math.max(1, ringRadius + ringBand * 2.4);
+      const broadLobe = 1 / (1 + broadNorm * broadNorm);
+      const magnetProfile =
+        broadLobe * (0.72 - pulseDriveShaped * 0.08) + ringLobe * (0.28 + pulseDriveShaped * 0.08);
+      const ringSpring = clamp(Math.abs(ringOffset) / Math.max(1, ringBand * 3.2), 0, 1.1);
+      let magnetForce = this.params.magnetStrength * magnetProfile * (0.52 + ringSpring * 0.34);
       magnetForce *= 0.9 + pulseJolt * 0.35;
       magnetForce *= magnetGate * magnetBoost * audioBoost;
       magnetForce *= 0.9 + fieldCoupling * 0.45;
@@ -2157,20 +2161,20 @@ class CapsuleFerrofluid {
       // Signed inward force toward the ring centerline:
       // - outside ring => inward (toward magnet center)
       // - inside ring  => outward (toward ring from center)
-      const ringSign = ringOffset > 0 ? 1 : -1;
+      const ringSign = ringOffset > 0 ? 1 : -0.12;
       const ringInwardForce = magnetForce * ringSign;
 
       // Center pole piece leakage term (always inward), stronger at lower excursion.
       const centerPoleRadius = Math.max(this.scale * 0.03, ringRadius * (0.36 + magnetSizeNorm * 0.16));
       const centerPoleNorm = magnetDist / Math.max(1, centerPoleRadius);
       const centerPoleFalloff = 1 / (1 + centerPoleNorm * centerPoleNorm);
-      const centerPoleBias = 0.008 + (1 - pulseDriveShaped) * 0.02;
+      const centerPoleBias = 0.004 + (1 - pulseDriveShaped) * 0.008;
       const centerPoleForce =
         this.params.magnetStrength *
         centerPoleFalloff *
         centerPoleBias *
         magnetGate *
-        0.38 *
+        0.26 *
         (0.84 + fieldCoupling * 0.22) *
         (1 - detachedFactor * 0.28 * blobCohesionNorm);
 
@@ -3421,6 +3425,22 @@ class CapsuleFerrofluid {
       this.fluidShadowCtx.globalCompositeOperation = "screen";
       this.fluidShadowCtx.fillStyle = paneVeil;
       this.fluidShadowCtx.fillRect(0, 0, filmWidth, filmHeight);
+
+      const sweep = this.fluidShadowCtx.createLinearGradient(
+        filmLedX - ledDirX * filmWidth * 0.36,
+        filmLedY - ledDirY * filmHeight * 0.36,
+        filmLedX + ledDirX * filmWidth * 0.36,
+        filmLedY + ledDirY * filmHeight * 0.36,
+      );
+      sweep.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, 0.03)`);
+      sweep.addColorStop(0.5, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.12 + diffusion * 0.22})`);
+      sweep.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.02)`);
+      this.fluidShadowCtx.fillStyle = sweep;
+      this.fluidShadowCtx.fillRect(0, 0, filmWidth, filmHeight);
+
+      // Keep plexi tint on the capsule pane/background only; do not tint fluid pixels.
+      this.fluidShadowCtx.globalCompositeOperation = "destination-out";
+      this.fluidShadowCtx.drawImage(this.fieldCanvas, 0, 0, filmWidth, filmHeight);
       this.fluidShadowCtx.globalCompositeOperation = "source-over";
 
       const filmBlur = Math.max(
@@ -3428,8 +3448,8 @@ class CapsuleFerrofluid {
         this.scale * (0.002 + diffusion * 0.044) * (0.68 + renderQualityNorm * 0.34),
       );
       this.ctx.save();
-      this.ctx.globalCompositeOperation = "screen";
-      this.ctx.globalAlpha = filmAlpha;
+      this.ctx.globalCompositeOperation = "multiply";
+      this.ctx.globalAlpha = clamp(filmAlpha * (0.62 + diffusion * 0.34), 0, 0.52);
       this.ctx.filter = `blur(${filmBlur}px)`;
       this.ctx.drawImage(
         this.fluidShadowCanvas,
@@ -3441,8 +3461,9 @@ class CapsuleFerrofluid {
       this.ctx.restore();
 
       this.ctx.save();
-      this.ctx.globalCompositeOperation = "soft-light";
-      this.ctx.globalAlpha = filmAlpha * 0.55;
+      this.ctx.globalCompositeOperation = "screen";
+      this.ctx.globalAlpha = clamp(filmAlpha * (0.36 + diffusion * 0.28), 0, 0.4);
+      this.ctx.filter = `blur(${Math.max(0.4, filmBlur * 0.76)}px)`;
       this.ctx.drawImage(
         this.fluidShadowCanvas,
         this.fieldBounds.x + fluidOffsetX,
@@ -3450,45 +3471,6 @@ class CapsuleFerrofluid {
         this.fieldBounds.w,
         this.fieldBounds.h,
       );
-      this.ctx.restore();
-
-      const frontHaloRadius = Math.max(rx, ry) * (0.28 + diffusion * 1.55);
-      const frontHaloCore = Math.max(1, frontHaloRadius * (0.05 + (1 - diffusion) * 0.18));
-      const frontHaloAlpha = clamp(filmAlpha * (0.12 + diffusion * 0.44), 0, 0.42);
-      this.ctx.save();
-      this.ctx.globalCompositeOperation = "screen";
-      this.ctx.globalAlpha = frontHaloAlpha;
-      const frontHalo = this.ctx.createRadialGradient(
-        ledCenterX,
-        ledCenterY,
-        frontHaloCore,
-        ledCenterX,
-        ledCenterY,
-        frontHaloRadius,
-      );
-      frontHalo.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, 0.96)`);
-      frontHalo.addColorStop(0.28, `rgba(${filmR}, ${filmG}, ${filmB}, 0.32)`);
-      frontHalo.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.02)`);
-      this.ctx.fillStyle = frontHalo;
-      this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
-      this.ctx.restore();
-
-      const sweepAlpha = clamp(frontHaloAlpha * (0.44 + diffusion * 0.5), 0, 0.24);
-      this.ctx.save();
-      this.ctx.globalCompositeOperation = "soft-light";
-      this.ctx.globalAlpha = sweepAlpha;
-      this.ctx.filter = `blur(${Math.max(0.8, this.scale * (0.004 + diffusion * 0.01))}px)`;
-      const sweep = this.ctx.createLinearGradient(
-        ledCenterX - ledDirX * rx * 1.25,
-        ledCenterY - ledDirY * ry * 1.25,
-        ledCenterX + ledDirX * rx * 1.25,
-        ledCenterY + ledDirY * ry * 1.25,
-      );
-      sweep.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, 0.04)`);
-      sweep.addColorStop(0.5, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.16 + diffusion * 0.18})`);
-      sweep.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.03)`);
-      this.ctx.fillStyle = sweep;
-      this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
       this.ctx.restore();
     }
 
