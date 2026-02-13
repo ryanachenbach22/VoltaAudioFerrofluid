@@ -2053,6 +2053,7 @@ class CapsuleFerrofluid {
 
     const pulseDrive = clamp(this.pulseEnvelope, 0, 1);
     const pulseDriveShaped = Math.pow(pulseDrive, 1.22);
+    const pulseSlope = (pulseDrive - this.prevPulseDrive) / Math.max(dt, 1e-4);
     const pulseDelta = Math.abs(pulseDrive - this.prevPulseDrive);
     this.prevPulseDrive = pulseDrive;
     const restRelax = 1 - smoothstep(0.08, 0.54, pulseDriveShaped);
@@ -2067,8 +2068,9 @@ class CapsuleFerrofluid {
       : 0;
     // Emphasize on/off contrast: weak hold + strong transient jolt.
     const envelopeHold = this.params.manualPulse ? pulseDriveShaped : pulseDriveShaped * (isInOutDrive ? 0.12 : 0.16);
-    const pulseJolt = clamp(pulseDelta * 18 + transientKick * 1.15 + (audioSignal.gate ? 0.12 : 0), 0, 2.4);
+    const pulseJolt = clamp(pulseDelta * 20 + transientKick * 1.25 + (audioSignal.gate ? 0.12 : 0), 0, 2.6);
     const magnetGate = clamp(envelopeHold + pulseJolt, 0, 2.4);
+    const releaseRepel = clamp((-pulseSlope) * 0.006 + pulseJolt * 0.035, 0, 0.68);
     const magnetBoost =
       1 + this.params.pulseAggression * (0.56 + pulseDriveShaped * 1.22 + pulseJolt * 0.35) * pulseDriveShaped;
     const audioBoost =
@@ -2133,8 +2135,8 @@ class CapsuleFerrofluid {
       // Annular driver model: field peaks on a ring (voice-coil geometry).
       // A weaker center pole term is blended in, so attraction can shift between
       // center-dominant and ring-dominant regions without introducing true repulsion.
-      const ringRadius = this.scale * (0.075 + magnetSize * 0.095);
-      const ringBand = this.scale * (0.14 + magnetSize * 0.12);
+      const ringRadius = this.scale * (0.11 + magnetSize * 0.115);
+      const ringBand = this.scale * (0.145 + magnetSize * 0.105);
       const ringOffset = magnetDist - ringRadius;
       const ringCenterDamp = smoothstep(0.34, 0.9, magnetDist / Math.max(1, ringRadius));
       const detachedFactor = detachedFactorFor(i);
@@ -2173,6 +2175,8 @@ class CapsuleFerrofluid {
         (1 - detachedFactor * 0.28 * blobCohesionNorm);
 
       let inwardMagnetForce = ringInwardForce + centerPoleForce;
+      // Let the field briefly invert on release so blobs can relax/fall before re-grab.
+      inwardMagnetForce -= dynamicMagnetClamp * releaseRepel;
       inwardMagnetForce = clamp(inwardMagnetForce, -dynamicMagnetClamp * 0.92, dynamicMagnetClamp);
       ax += (mx * invMagnetDist) * inwardMagnetForce;
       ay += (my * invMagnetDist) * inwardMagnetForce;
@@ -3549,8 +3553,8 @@ class CapsuleFerrofluid {
 
   drawMagnet() {
     const magnetSize = clamp(this.params.magnetSize, 0.35, 5.0);
-    const ringRadius = this.scale * (0.055 + magnetSize * 0.088);
-    const ringBand = this.scale * (0.075 + magnetSize * 0.11);
+    const ringRadius = this.scale * (0.11 + magnetSize * 0.115);
+    const ringBand = this.scale * (0.145 + magnetSize * 0.105);
     const outerRadius = ringRadius + ringBand * 0.5;
     const innerRadius = Math.max(this.scale * 0.01, ringRadius - ringBand * 0.5);
     const pulseMix = 0.2 + this.pulseState * 0.8;
@@ -3584,11 +3588,6 @@ class CapsuleFerrofluid {
     this.ctx.strokeStyle = `rgba(121, 182, 255, ${0.18 + pulseMix * 0.3})`;
     this.ctx.arc(0, 0, ringRadius, 0, TAU);
     this.ctx.stroke();
-
-    this.ctx.beginPath();
-    this.ctx.fillStyle = `rgba(168, 211, 255, ${0.2 + pulseMix * 0.24})`;
-    this.ctx.arc(0, 0, Math.max(this.scale * 0.006, innerRadius * 0.18), 0, TAU);
-    this.ctx.fill();
 
     this.ctx.restore();
   }
