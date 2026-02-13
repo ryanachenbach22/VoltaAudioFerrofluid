@@ -2053,6 +2053,8 @@ class CapsuleFerrofluid {
 
     const pulseDrive = clamp(this.pulseEnvelope, 0, 1);
     const pulseDriveShaped = Math.pow(pulseDrive, 1.22);
+    const pulseDelta = Math.abs(pulseDrive - this.prevPulseDrive);
+    this.prevPulseDrive = pulseDrive;
     const restRelax = 1 - smoothstep(0.08, 0.54, pulseDriveShaped);
     const dynamicResistance =
       clamp(this.params.resistance, 0, 2.2) /
@@ -2060,8 +2062,12 @@ class CapsuleFerrofluid {
     const resistanceDamping = Math.exp(-dynamicResistance * 2.15 * dt);
 
     const idleAudio = this.params.audioReactive && !audioSignal.active && !this.params.manualPulse;
-    const baselineMagnet = 0;
-    const magnetGate = baselineMagnet + (1 - baselineMagnet) * pulseDriveShaped;
+    const transientKick = this.params.audioReactive
+      ? clamp(audioSignal.transient * 0.95 + audioSignal.impact * 0.55, 0, 1.4)
+      : 0;
+    // Keep the field mostly event-driven so the blob gets jostled instead of held.
+    const envelopeHold = this.params.manualPulse ? pulseDriveShaped : pulseDriveShaped * (isInOutDrive ? 0.22 : 0.3);
+    const magnetGate = clamp(envelopeHold + pulseDelta * 9.5 + transientKick * 0.7, 0, 1.35);
     const magnetBoost =
       1 + this.params.pulseAggression * (0.62 + pulseDriveShaped * 1.15) * pulseDriveShaped;
     const audioBoost =
@@ -2104,12 +2110,11 @@ class CapsuleFerrofluid {
       fieldTensionGain *
       baseSurfaceGain;
 
-    const driverTravel = isInOutDrive ? this.scale * clamp(this.params.driverTravel, 0, 0.08) : 0;
+    // Remove in/out driver wobble: keep the electromagnet fixed and only pulse field strength.
+    const driverTravel = 0;
     this.magnetX = this.magnetBaseX;
     this.magnetY = this.magnetBaseY + (0.5 - pulseDrive) * driverTravel;
     this.pulseState = pulseDrive;
-    const pulseDelta = Math.abs(pulseDrive - this.prevPulseDrive);
-    this.prevPulseDrive = pulseDrive;
 
     let speedAccum = 0;
     for (let i = 0; i < count; i += 1) {
@@ -2118,22 +2123,25 @@ class CapsuleFerrofluid {
 
       const mx = this.magnetX - this.px[i];
       const my = this.magnetY - this.py[i];
-      const magnetDistSq = mx * mx + my * my + 0.0001;
+      // Simulate magnet standoff behind the capsule wall to avoid hard imprinting.
+      const magnetStandoff = this.scale * (0.22 + magnetSizeNorm * 0.04);
+      const magnetDistSq = mx * mx + my * my + magnetStandoff * magnetStandoff + 0.0001;
       const magnetDist = Math.sqrt(magnetDistSq);
       const invMagnetDist = 1 / magnetDist;
 
       // Annular driver model: field peaks on a ring (voice-coil geometry).
       // A weaker center pole term is blended in, so attraction can shift between
       // center-dominant and ring-dominant regions without introducing true repulsion.
-      const ringRadius = this.scale * (0.055 + magnetSize * 0.088);
-      const ringBand = this.scale * (0.075 + magnetSize * 0.11);
+      const ringRadius = this.scale * (0.075 + magnetSize * 0.095);
+      const ringBand = this.scale * (0.14 + magnetSize * 0.12);
       const ringOffset = magnetDist - ringRadius;
       const ringCenterDamp = smoothstep(0.34, 0.9, magnetDist / Math.max(1, ringRadius));
       const detachedFactor = detachedFactorFor(i);
       const ringT = ringOffset / Math.max(1, ringBand);
       const ringFalloff = 1 / (1 + ringT * ringT);
-      const ringSpring = clamp(Math.abs(ringOffset) / Math.max(1, ringBand * 1.8), 0, 2.0);
+      const ringSpring = clamp(Math.abs(ringOffset) / Math.max(1, ringBand * 2.8), 0, 1.2);
       let magnetForce = this.params.magnetStrength * ringSpring * ringFalloff;
+      magnetForce *= 0.58;
       magnetForce *= magnetGate * magnetBoost * audioBoost;
       magnetForce *= 0.9 + fieldCoupling * 0.45;
       magnetForce *= 1 - detachedFactor * 0.42 * blobCohesionNorm;
@@ -2153,12 +2161,13 @@ class CapsuleFerrofluid {
       const centerPoleRadius = Math.max(this.scale * 0.03, ringRadius * (0.36 + magnetSizeNorm * 0.16));
       const centerPoleNorm = magnetDist / Math.max(1, centerPoleRadius);
       const centerPoleFalloff = 1 / (1 + centerPoleNorm * centerPoleNorm);
-      const centerPoleBias = 0.12 + (1 - pulseDriveShaped) * 0.4;
+      const centerPoleBias = 0.02 + (1 - pulseDriveShaped) * 0.05;
       const centerPoleForce =
         this.params.magnetStrength *
         centerPoleFalloff *
         centerPoleBias *
         magnetGate *
+        0.38 *
         (0.84 + fieldCoupling * 0.22) *
         (1 - detachedFactor * 0.28 * blobCohesionNorm);
 
