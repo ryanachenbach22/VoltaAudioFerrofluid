@@ -114,7 +114,7 @@ class CapsuleFerrofluid {
     this.ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
 
     this.params = {
-      particleCount: 90,
+      particleCount: 180,
       magnetStrength: 1753,
       magnetSize: 1.6,
       gravity: 0,
@@ -129,8 +129,8 @@ class CapsuleFerrofluid {
       density: 1.34,
       viscosity: 0.145,
       resistance: 0.04,
-      surfaceTension: 0.0,
-      blobCohesion: 0.0,
+      surfaceTension: 0.24,
+      blobCohesion: 0.55,
       pointLightColorHex: "#ff0000",
       useHdriReflections: true,
       showEnvironment: false,
@@ -1586,7 +1586,7 @@ class CapsuleFerrofluid {
     };
 
     this.scale = Math.min(rx, ry);
-    this.fluidSpawnRadius = this.scale * 0.19;
+    this.fluidSpawnRadius = this.scale * 0.23;
 
     this.magnetBaseX = this.capsule.cx;
     this.magnetBaseY = this.capsule.cy;
@@ -1603,12 +1603,12 @@ class CapsuleFerrofluid {
     this.magnetClamp = 5200;
     this.maxSpeed = this.scale * 6.2;
 
-    this.isoLevel = 1.68;
-    this.isoSoftness = 0.26;
-    this.edgeFeather = 0.095;
-    this.normalScale = 1.28;
+    this.isoLevel = 1.52;
+    this.isoSoftness = 0.34;
+    this.edgeFeather = 0.14;
+    this.normalScale = 1.05;
 
-    this.sigma = this.scale * 0.106;
+    this.sigma = this.scale * 0.118;
     this.invSigma2 = 1 / (2 * this.sigma * this.sigma);
     this.influenceRadius = this.sigma * 3.1;
     this.influenceRadiusSq = this.influenceRadius * this.influenceRadius;
@@ -1845,8 +1845,8 @@ class CapsuleFerrofluid {
     const blobCohesion = clamp(this.params.blobCohesion, 0, 8.0);
     const blobCohesionNorm = blobCohesion / 8;
     // Keep cohesion/tension strengthening independent from viscosity.
-    const baseCohesionGain = 1 + blobCohesionNorm * 2.15;
-    const baseSurfaceGain = 1 + blobCohesionNorm * 1.55;
+    const baseCohesionGain = 1.32 + blobCohesionNorm * 2.15;
+    const baseSurfaceGain = 1.28 + blobCohesionNorm * 1.55;
     this.updatePointLightPosition();
     this.updateViewOffset();
 
