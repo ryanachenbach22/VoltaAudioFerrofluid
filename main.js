@@ -3029,7 +3029,6 @@ class CapsuleFerrofluid {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     if (this.params.showEnvironment) {
       this.drawWhiteRoom();
-      this.drawEnvironmentLight();
     } else {
       this.drawStudioBackground();
     }
