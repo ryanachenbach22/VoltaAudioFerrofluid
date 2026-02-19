@@ -354,56 +354,68 @@ class CapsuleFerrofluid {
     const defaults = this.defaultParams;
     const sanitized = {};
 
-    for (const key of PROFILE_NUMERIC_KEYS) {
-      const fallback = Number(defaults[key]);
-      const parsed = Number(source[key]);
-      sanitized[key] = Number.isFinite(parsed) ? parsed : fallback;
-    }
+    for (const key of Object.keys(defaults)) {
+      const fallback = defaults[key];
+      const value = source[key];
 
-    for (const key of PROFILE_BOOLEAN_KEYS) {
-      const fallback = Boolean(defaults[key]);
-      sanitized[key] = typeof source[key] === "boolean" ? source[key] : fallback;
-    }
+      if (typeof fallback === "number") {
+        const parsed = Number(value);
+        sanitized[key] = Number.isFinite(parsed) ? parsed : fallback;
+        continue;
+      }
 
-    const fallbackDriveMode = defaults.driveMode === "inout" ? "inout" : "gate";
-    sanitized.driveMode = source.driveMode === "inout" || source.driveMode === "gate"
-      ? source.driveMode
-      : fallbackDriveMode;
-    sanitized.fluidColorHex = normalizeHexColor(source.fluidColorHex, defaults.fluidColorHex);
-    sanitized.pointLightColorHex = normalizeHexColor(
-      source.pointLightColorHex,
-      defaults.pointLightColorHex,
-    );
+      if (typeof fallback === "boolean") {
+        sanitized[key] = typeof value === "boolean" ? value : fallback;
+        continue;
+      }
+
+      if (typeof fallback === "string") {
+        if (key === "driveMode") {
+          const fallbackDriveMode = fallback === "inout" ? "inout" : "gate";
+          sanitized[key] = value === "inout" || value === "gate" ? value : fallbackDriveMode;
+          continue;
+        }
+        if (key === "fluidColorHex" || key === "pointLightColorHex") {
+          sanitized[key] = normalizeHexColor(value, fallback);
+          continue;
+        }
+        sanitized[key] = typeof value === "string" ? value : fallback;
+        continue;
+      }
+
+      sanitized[key] = fallback;
+    }
 
     return sanitized;
   }
 
   collectProfileValues() {
     const values = {};
-    for (const key of PROFILE_NUMERIC_KEYS) {
-      values[key] = Number(this.params[key]);
+    for (const key of Object.keys(this.defaultParams)) {
+      const fallback = this.defaultParams[key];
+      const current = this.params[key];
+      if (typeof fallback === "number") {
+        values[key] = Number.isFinite(Number(current)) ? Number(current) : fallback;
+      } else if (typeof fallback === "boolean") {
+        values[key] = Boolean(current);
+      } else if (typeof fallback === "string") {
+        if (key === "driveMode") {
+          values[key] = current === "inout" ? "inout" : "gate";
+        } else if (key === "fluidColorHex" || key === "pointLightColorHex") {
+          values[key] = normalizeHexColor(current, fallback);
+        } else {
+          values[key] = typeof current === "string" ? current : fallback;
+        }
+      } else {
+        values[key] = fallback;
+      }
     }
-    for (const key of PROFILE_BOOLEAN_KEYS) {
-      values[key] = Boolean(this.params[key]);
-    }
-    values.driveMode = this.params.driveMode === "inout" ? "inout" : "gate";
-    values.fluidColorHex = normalizeHexColor(this.params.fluidColorHex, this.defaultParams.fluidColorHex);
-    values.pointLightColorHex = normalizeHexColor(
-      this.params.pointLightColorHex,
-      this.defaultParams.pointLightColorHex,
-    );
     return values;
   }
 
   applyProfileValues(values, syncControls = false) {
     const sanitized = this.sanitizeProfileValues(values);
-    for (const key of PROFILE_NUMERIC_KEYS) {
-      this.params[key] = sanitized[key];
-    }
-    for (const key of PROFILE_BOOLEAN_KEYS) {
-      this.params[key] = sanitized[key];
-    }
-    for (const key of PROFILE_STRING_KEYS) {
+    for (const key of Object.keys(this.defaultParams)) {
       this.params[key] = sanitized[key];
     }
 
@@ -1340,7 +1352,7 @@ class CapsuleFerrofluid {
       binding.update();
     }
 
-    for (const key of PROFILE_BOOLEAN_KEYS) {
+    for (const key of Object.keys(this.checkboxBindings)) {
       const binding = this.checkboxBindings[key];
       if (!binding) {
         continue;
