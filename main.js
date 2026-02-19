@@ -1587,8 +1587,8 @@ class CapsuleFerrofluid {
     this.ctx.imageSmoothingQuality = "high";
 
     const side = Math.min(this.width, this.height);
-    const rx = side * 0.26;
-    const ry = side * 0.355;
+    const rx = side * 0.325;
+    const ry = side * 0.44375;
 
     this.capsule = {
       cx: this.width * 0.5,
@@ -2648,7 +2648,7 @@ class CapsuleFerrofluid {
 
         const pointHalf = Math.max(0, nx * pxh + ny * pyh + nz * pzh);
         const pointSpecular =
-          Math.pow(pointHalf, 74 + surfaceSharpness * 60) *
+          Math.pow(pointHalf, 66 + surfaceSharpness * 52) *
           attenuation *
           lightPower *
           ledWrap *
@@ -2773,7 +2773,7 @@ class CapsuleFerrofluid {
         envMirrorColorB = envMirrorColorB * (1 - roomWhiteMixMirror) + roomWhiteB * roomWhiteMixMirror;
         const ambientDiffuse = ambientStrength * (0.24 + ambientFacing * 0.76) * occlusion;
         const pointGlint =
-          Math.pow(Math.max(0, nx * lx + ny * ly + nz * lz), 36) *
+          Math.pow(Math.max(0, nx * lx + ny * ly + nz * lz), 28) *
           attenuation *
           lightPower *
           sideLightStrength *
@@ -2815,13 +2815,31 @@ class CapsuleFerrofluid {
         const toneDepthDamp = 0.82 + rimSpecBias * 0.24;
         tone = applyContrast(compressHighlight(tone, 1.16), 1.18) * toneDepthDamp;
 
+        const claritySpecGain = 0.78 + smoothstep(0.5, 2.5, reflectionClarity) * 1.02;
+        const noHdriSpecBoost = useEnvReflections ? 1 : 1.48;
         const directSpecGain =
           (0.08 + clamp(lightPower / 1.2, 0, 1) * 0.34) *
           (0.14 + sideLightStrength * 0.48) *
           (0.3 + motionSpecGate * 1.8) *
-          (0.6 + impactHighlights * 0.9);
+          (0.6 + impactHighlights * 0.9) *
+          claritySpecGain *
+          noHdriSpecBoost;
+        const secondaryGlint =
+          Math.pow(pointHalf, 28 + surfaceSharpness * 26) *
+          attenuation *
+          lightPower *
+          ledWrap *
+          sideLightStrength *
+          (0.16 + motionSpecGate * 1.35) *
+          centerSpecDamp *
+          (0.42 + edgeDensity * 0.58);
         const whiteMirror =
-          (pointSpecular * 220 + pointSpecularTight * 760 + fresnel * (18 + lightPower * 56)) *
+          (
+            pointSpecular * 220 +
+            pointSpecularTight * 760 +
+            secondaryGlint * 240 +
+            fresnel * (18 + lightPower * 56)
+          ) *
           (0.24 + edgeDensity * 0.76) *
           specEdgeMask *
           centerSpecDamp *
@@ -2844,6 +2862,7 @@ class CapsuleFerrofluid {
           motionSpecGate *
           impactHighlights *
           qualityHotspotScale *
+          noHdriSpecBoost *
           (24 + motionSpecGate * 460);
         const coloredHotspot =
           pointHotspot *
@@ -3284,6 +3303,85 @@ class CapsuleFerrofluid {
     this.ctx.fillStyle = interiorFill;
     this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
 
+    if (plexiFilmStrength > 0.001) {
+      const diffusion = smoothstep(0, 1, plexiFilmDiffusion);
+      const filmBaseR = 132;
+      const filmBaseG = 142;
+      const filmBaseB = 170;
+      const ledTintMix = 0.66;
+      const filmR = clamp(
+        Math.round(filmBaseR * (1 - ledTintMix) + this.pointLightColor[0] * 255 * ledTintMix),
+        0,
+        255,
+      );
+      const filmG = clamp(
+        Math.round(filmBaseG * (1 - ledTintMix) + this.pointLightColor[1] * 255 * ledTintMix),
+        0,
+        255,
+      );
+      const filmB = clamp(
+        Math.round(filmBaseB * (1 - ledTintMix) + this.pointLightColor[2] * 255 * ledTintMix),
+        0,
+        255,
+      );
+      const filmAlpha = clamp(
+        plexiFilmStrength *
+          (0.14 + ledIntensity * 0.22) *
+          (0.34 + sideLightStrength * 0.66) *
+          (0.56 + diffusion * 0.56),
+        0,
+        0.56,
+      );
+      const edgeCore = Math.max(2, Math.min(rx, ry) * (0.18 + (1 - diffusion) * 0.08));
+      const edgeRadius = Math.max(rx, ry) * (1.02 + diffusion * 0.02);
+
+      this.ctx.save();
+      this.ctx.globalCompositeOperation = "screen";
+      this.ctx.globalAlpha = clamp(filmAlpha * (0.52 + diffusion * 0.24), 0, 0.5);
+      const edgeField = this.ctx.createRadialGradient(cx, cy, edgeCore, cx, cy, edgeRadius);
+      edgeField.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, 0.00)`);
+      edgeField.addColorStop(0.58, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.02 + diffusion * 0.03})`);
+      edgeField.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.54 + diffusion * 0.24})`);
+      this.ctx.fillStyle = edgeField;
+      this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
+      this.ctx.restore();
+
+      this.ctx.save();
+      this.ctx.globalCompositeOperation = "screen";
+      this.ctx.globalAlpha = clamp(filmAlpha * (0.44 + diffusion * 0.36), 0, 0.44);
+      this.ctx.filter = `blur(${Math.max(0.8, this.scale * (0.003 + diffusion * 0.01))}px)`;
+      const sweep = this.ctx.createLinearGradient(
+        cx - ledDirX * rx * 1.08,
+        cy - ledDirY * ry * 1.08,
+        cx + ledDirX * rx * 1.08,
+        cy + ledDirY * ry * 1.08,
+      );
+      sweep.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, 0.01)`);
+      sweep.addColorStop(0.52, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.08 + diffusion * 0.08})`);
+      sweep.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.5 + diffusion * 0.3})`);
+      this.ctx.fillStyle = sweep;
+      this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
+      this.ctx.restore();
+
+      // Keep the center cleaner so the film reads as edge-led diffusion.
+      this.ctx.save();
+      this.ctx.globalCompositeOperation = "multiply";
+      this.ctx.globalAlpha = clamp(filmAlpha * (0.24 + diffusion * 0.14), 0, 0.22);
+      const centerFade = this.ctx.createRadialGradient(
+        cx,
+        cy,
+        Math.max(2, Math.min(rx, ry) * 0.08),
+        cx,
+        cy,
+        Math.max(rx, ry) * 0.78,
+      );
+      centerFade.addColorStop(0, "rgba(255, 255, 255, 1)");
+      centerFade.addColorStop(1, "rgba(255, 255, 255, 0)");
+      this.ctx.fillStyle = centerFade;
+      this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
+      this.ctx.restore();
+    }
+
     // Capsule-wall LED lighting disabled (temporary) to avoid wall artifacts.
 
     if (this.fluidShadowCtx) {
@@ -3368,123 +3466,6 @@ class CapsuleFerrofluid {
     this.ctx.ellipse(ledCenterX, ledCenterY, rx * 0.9, ry * 0.9, 0, 0, TAU);
     this.ctx.stroke();
     this.ctx.restore();
-
-    if (plexiFilmStrength > 0.001 && this.fluidShadowCtx) {
-      const filmWidth = this.fluidShadowCanvas.width;
-      const filmHeight = this.fluidShadowCanvas.height;
-      const diffusion = smoothstep(0, 1, plexiFilmDiffusion);
-      const filmScaleX = filmWidth / Math.max(1, this.fieldBounds.w);
-      const filmScaleY = filmHeight / Math.max(1, this.fieldBounds.h);
-      const filmLedX = (ledCenterX - (this.fieldBounds.x + fluidOffsetX)) * filmScaleX;
-      const filmLedY = (ledCenterY - (this.fieldBounds.y + fluidOffsetY)) * filmScaleY;
-      const filmBaseR = 132;
-      const filmBaseG = 142;
-      const filmBaseB = 170;
-      const ledTintMix = 0.66;
-      const filmR = clamp(
-        Math.round(filmBaseR * (1 - ledTintMix) + this.pointLightColor[0] * 255 * ledTintMix),
-        0,
-        255,
-      );
-      const filmG = clamp(
-        Math.round(filmBaseG * (1 - ledTintMix) + this.pointLightColor[1] * 255 * ledTintMix),
-        0,
-        255,
-      );
-      const filmB = clamp(
-        Math.round(filmBaseB * (1 - ledTintMix) + this.pointLightColor[2] * 255 * ledTintMix),
-        0,
-        255,
-      );
-      const filmAlpha = clamp(
-        plexiFilmStrength *
-          (0.16 + ledIntensity * 0.24) *
-          (0.3 + sideLightStrength * 0.7) *
-          (0.5 + diffusion * 0.75),
-        0,
-        0.62,
-      );
-
-      this.fluidShadowCtx.clearRect(0, 0, filmWidth, filmHeight);
-      const filmRadius =
-        Math.max(filmWidth, filmHeight) * (0.16 + diffusion * 1.12);
-      const filmCore = Math.max(1, filmRadius * (0.22 - diffusion * 0.18));
-      const filmGradient = this.fluidShadowCtx.createRadialGradient(
-        filmLedX,
-        filmLedY,
-        filmCore,
-        filmLedX,
-        filmLedY,
-        filmRadius,
-      );
-      filmGradient.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, 0.92)`);
-      filmGradient.addColorStop(0.26, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.58 - diffusion * 0.12})`);
-      filmGradient.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.02 + diffusion * 0.12})`);
-      this.fluidShadowCtx.fillStyle = filmGradient;
-      this.fluidShadowCtx.fillRect(0, 0, filmWidth, filmHeight);
-
-      const filmWash = this.fluidShadowCtx.createLinearGradient(0, 0, filmWidth, filmHeight);
-      filmWash.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.05 + diffusion * 0.24})`);
-      filmWash.addColorStop(0.6, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.01 + diffusion * 0.1})`);
-      filmWash.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.01)`);
-      this.fluidShadowCtx.fillStyle = filmWash;
-      this.fluidShadowCtx.fillRect(0, 0, filmWidth, filmHeight);
-
-      const paneVeil = this.fluidShadowCtx.createLinearGradient(0, filmHeight * 0.04, 0, filmHeight * 0.96);
-      paneVeil.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.06 + diffusion * 0.2})`);
-      paneVeil.addColorStop(0.52, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.02 + diffusion * 0.08})`);
-      paneVeil.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.01)`);
-      this.fluidShadowCtx.globalCompositeOperation = "screen";
-      this.fluidShadowCtx.fillStyle = paneVeil;
-      this.fluidShadowCtx.fillRect(0, 0, filmWidth, filmHeight);
-
-      const sweep = this.fluidShadowCtx.createLinearGradient(
-        filmLedX - ledDirX * filmWidth * 0.36,
-        filmLedY - ledDirY * filmHeight * 0.36,
-        filmLedX + ledDirX * filmWidth * 0.36,
-        filmLedY + ledDirY * filmHeight * 0.36,
-      );
-      sweep.addColorStop(0, `rgba(${filmR}, ${filmG}, ${filmB}, 0.03)`);
-      sweep.addColorStop(0.5, `rgba(${filmR}, ${filmG}, ${filmB}, ${0.12 + diffusion * 0.22})`);
-      sweep.addColorStop(1, `rgba(${filmR}, ${filmG}, ${filmB}, 0.02)`);
-      this.fluidShadowCtx.fillStyle = sweep;
-      this.fluidShadowCtx.fillRect(0, 0, filmWidth, filmHeight);
-
-      // Keep plexi tint on the capsule pane/background only; do not tint fluid pixels.
-      this.fluidShadowCtx.globalCompositeOperation = "destination-out";
-      this.fluidShadowCtx.drawImage(this.fieldCanvas, 0, 0, filmWidth, filmHeight);
-      this.fluidShadowCtx.globalCompositeOperation = "source-over";
-
-      const filmBlur = Math.max(
-        0.6,
-        this.scale * (0.002 + diffusion * 0.044) * (0.68 + renderQualityNorm * 0.34),
-      );
-      this.ctx.save();
-      this.ctx.globalCompositeOperation = "multiply";
-      this.ctx.globalAlpha = clamp(filmAlpha * (0.62 + diffusion * 0.34), 0, 0.52);
-      this.ctx.filter = `blur(${filmBlur}px)`;
-      this.ctx.drawImage(
-        this.fluidShadowCanvas,
-        this.fieldBounds.x + fluidOffsetX,
-        this.fieldBounds.y + fluidOffsetY,
-        this.fieldBounds.w,
-        this.fieldBounds.h,
-      );
-      this.ctx.restore();
-
-      this.ctx.save();
-      this.ctx.globalCompositeOperation = "screen";
-      this.ctx.globalAlpha = clamp(filmAlpha * (0.36 + diffusion * 0.28), 0, 0.4);
-      this.ctx.filter = `blur(${Math.max(0.4, filmBlur * 0.76)}px)`;
-      this.ctx.drawImage(
-        this.fluidShadowCanvas,
-        this.fieldBounds.x + fluidOffsetX,
-        this.fieldBounds.y + fluidOffsetY,
-        this.fieldBounds.w,
-        this.fieldBounds.h,
-      );
-      this.ctx.restore();
-    }
 
     this.ctx.restore();
   }
