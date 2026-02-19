@@ -194,6 +194,7 @@ class CapsuleFerrofluid {
     this.orbitLastX = 0;
     this.orbitLastY = 0;
     this.motionHighlight = 0;
+    this.capsuleShapePower = 4.6;
     this.perf = {
       frameMsAvg: 0,
       stepMsAvg: 0,
@@ -2318,6 +2319,7 @@ class CapsuleFerrofluid {
     const rx = Math.max(10, this.capsule.rx - padding);
     const ryBottom = Math.max(10, this.capsule.ry - padding);
     const ryTop = Math.max(10, this.capsule.ry - (padding + this.scale * 0.1));
+    const power = Math.max(2.2, this.capsuleShapePower || 4.6);
 
     const lx = this.px[index] - this.capsule.cx;
     const ly = this.py[index] - this.capsule.cy;
@@ -2325,18 +2327,22 @@ class CapsuleFerrofluid {
 
     const nx = lx / rx;
     const ny = ly / ryCurrent;
-    const value = nx * nx + ny * ny;
+    const absNx = Math.abs(nx);
+    const absNy = Math.abs(ny);
+    const value = Math.pow(absNx, power) + Math.pow(absNy, power);
 
     if (value <= 1) {
       return;
     }
 
-    const inv = 1 / Math.sqrt(value);
-    this.px[index] = this.capsule.cx + nx * inv * rx;
-    this.py[index] = this.capsule.cy + ny * inv * ryCurrent;
+    const inv = 1 / Math.pow(value, 1 / power);
+    const boundaryNx = nx * inv;
+    const boundaryNy = ny * inv;
+    this.px[index] = this.capsule.cx + boundaryNx * rx;
+    this.py[index] = this.capsule.cy + boundaryNy * ryCurrent;
 
-    const gx = (this.px[index] - this.capsule.cx) / (rx * rx);
-    const gy = (this.py[index] - this.capsule.cy) / (ryCurrent * ryCurrent);
+    const gx = (Math.sign(boundaryNx) * Math.pow(Math.abs(boundaryNx), power - 1)) / Math.max(1, rx);
+    const gy = (Math.sign(boundaryNy) * Math.pow(Math.abs(boundaryNy), power - 1)) / Math.max(1, ryCurrent);
     const gl = Math.hypot(gx, gy) || 1;
 
     const normalX = gx / gl;
@@ -3127,14 +3133,12 @@ class CapsuleFerrofluid {
     this.ctx.fillStyle = glow;
     this.ctx.beginPath();
     this.ctx.rect(0, 0, this.width, this.height);
-    this.ctx.ellipse(
+    this.traceCapsulePath(
+      this.ctx,
       this.capsule.cx,
       this.capsule.cy,
       this.capsule.rx * 1.03,
       this.capsule.ry * 1.03,
-      0,
-      0,
-      TAU,
     );
     this.ctx.fill("evenodd");
     this.ctx.restore();
@@ -3264,6 +3268,30 @@ class CapsuleFerrofluid {
     this.ctx.restore();
   }
 
+  traceCapsulePath(ctx, cx, cy, rx, ry) {
+    const power = Math.max(2.2, this.capsuleShapePower || 4.6);
+    const exponent = 2 / power;
+    const segments = 80;
+    for (let i = 0; i <= segments; i += 1) {
+      const t = (i / segments) * TAU;
+      const c = Math.cos(t);
+      const s = Math.sin(t);
+      const x = cx + rx * Math.sign(c) * Math.pow(Math.abs(c), exponent);
+      const y = cy + ry * Math.sign(s) * Math.pow(Math.abs(s), exponent);
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.closePath();
+  }
+
+  drawCapsulePath(ctx, cx, cy, rx, ry) {
+    ctx.beginPath();
+    this.traceCapsulePath(ctx, cx, cy, rx, ry);
+  }
+
   drawFluid() {
     const { cx, cy, rx, ry } = this.capsule;
     const fluidOffsetX = this.viewOffsetX;
@@ -3292,8 +3320,7 @@ class CapsuleFerrofluid {
     const lb = Math.round(this.pointLightColor[2] * 255);
 
     this.ctx.save();
-    this.ctx.beginPath();
-    this.ctx.ellipse(cx, cy, rx, ry, 0, 0, TAU);
+    this.drawCapsulePath(this.ctx, cx, cy, rx, ry);
     this.ctx.clip();
 
     const interiorFill = this.ctx.createLinearGradient(cx, cy - ry, cx, cy + ry);
@@ -3488,8 +3515,7 @@ class CapsuleFerrofluid {
     const lb = Math.round(this.pointLightColor[2] * 255);
 
     this.ctx.save();
-    this.ctx.beginPath();
-    this.ctx.ellipse(cx, cy, rx, ry, 0, 0, TAU);
+    this.drawCapsulePath(this.ctx, cx, cy, rx, ry);
 
     const shell = this.ctx.createLinearGradient(cx - rx, cy - ry, cx + rx, cy + ry);
     shell.addColorStop(0, "rgba(236, 244, 255, 0.1)");
@@ -3525,8 +3551,7 @@ class CapsuleFerrofluid {
     this.ctx.filter = `blur(${Math.max(1.0, this.scale * 0.008)}px)`;
     this.ctx.strokeStyle = rimLight;
     this.ctx.lineWidth = Math.max(1.2, this.scale * 0.009);
-    this.ctx.beginPath();
-    this.ctx.ellipse(cx, cy, rx * 0.995, ry * 0.995, 0, 0, TAU);
+    this.drawCapsulePath(this.ctx, cx, cy, rx * 0.995, ry * 0.995);
     this.ctx.stroke();
 
     this.ctx.restore();
