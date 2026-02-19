@@ -12,6 +12,9 @@ const PROFILE_NUMERIC_KEYS = [
   "cameraOffsetX",
   "cameraYaw",
   "cameraOffsetY",
+  "capsuleRoundness",
+  "capsuleWidth",
+  "capsuleHeight",
   "pulseHz",
   "pulseAggression",
   "driverTravel",
@@ -122,6 +125,9 @@ class CapsuleFerrofluid {
       cameraOffsetX: 0.08,
       cameraYaw: 10.0,
       cameraOffsetY: -0.04,
+      capsuleRoundness: 3.35,
+      capsuleWidth: 1.0,
+      capsuleHeight: 1.0,
       enableOrbitDrag: true,
       pulseHz: 8.4,
       pulseAggression: 7.2,
@@ -194,7 +200,6 @@ class CapsuleFerrofluid {
     this.orbitLastX = 0;
     this.orbitLastY = 0;
     this.motionHighlight = 0;
-    this.capsuleShapePower = 4.6;
     this.perf = {
       frameMsAvg: 0,
       stepMsAvg: 0,
@@ -1206,6 +1211,9 @@ class CapsuleFerrofluid {
     if (
       id === "cameraOffsetX" ||
       id === "cameraOffsetY" ||
+      id === "capsuleRoundness" ||
+      id === "capsuleWidth" ||
+      id === "capsuleHeight" ||
       id === "magnetSize" ||
       id === "density" ||
       id === "resistance" ||
@@ -1256,7 +1264,10 @@ class CapsuleFerrofluid {
         this.params[id] = numeric;
         output.textContent = this.formatNumericControlValue(id, numeric);
 
-        if (id === "renderQuality" && !this.suspendControlResizes) {
+        if (
+          (id === "renderQuality" || id === "capsuleWidth" || id === "capsuleHeight") &&
+          !this.suspendControlResizes
+        ) {
           this.resize();
         }
       };
@@ -1588,8 +1599,10 @@ class CapsuleFerrofluid {
     this.ctx.imageSmoothingQuality = "high";
 
     const side = Math.min(this.width, this.height);
-    const rx = side * 0.325;
-    const ry = side * 0.44375;
+    const capsuleWidth = clamp(this.params.capsuleWidth, 0.75, 1.35);
+    const capsuleHeight = clamp(this.params.capsuleHeight, 0.75, 1.35);
+    const rx = side * 0.325 * capsuleWidth;
+    const ry = side * 0.44375 * capsuleHeight;
 
     this.capsule = {
       cx: this.width * 0.5,
@@ -2319,7 +2332,7 @@ class CapsuleFerrofluid {
     const rx = Math.max(10, this.capsule.rx - padding);
     const ryBottom = Math.max(10, this.capsule.ry - padding);
     const ryTop = Math.max(10, this.capsule.ry - (padding + this.scale * 0.1));
-    const power = Math.max(2.2, this.capsuleShapePower || 4.6);
+    const power = clamp(this.params.capsuleRoundness, 2.2, 7.0);
 
     const lx = this.px[index] - this.capsule.cx;
     const ly = this.py[index] - this.capsule.cy;
@@ -3269,7 +3282,7 @@ class CapsuleFerrofluid {
   }
 
   traceCapsulePath(ctx, cx, cy, rx, ry) {
-    const power = Math.max(2.2, this.capsuleShapePower || 4.6);
+    const power = clamp(this.params.capsuleRoundness, 2.2, 7.0);
     const exponent = 2 / power;
     const segments = 80;
     for (let i = 0; i <= segments; i += 1) {
