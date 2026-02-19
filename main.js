@@ -1665,11 +1665,12 @@ class CapsuleFerrofluid {
     this.fieldGridRows = Math.max(1, Math.ceil(this.fieldBounds.h / this.fieldGridCellSize));
     this.fieldGridHeads = new Int32Array(this.fieldGridCols * this.fieldGridRows);
 
-    const dprFactor = 0.96 + this.dpr * 0.28;
+    const dprFactor = 0.9 + this.dpr * 0.2;
+    const qualityScale = Math.pow(clamp(this.params.renderQuality, 0.6, 2.4), 0.92);
     const targetH = clamp(
-      Math.round(this.capsule.ry * this.params.renderQuality * dprFactor),
-      180,
-      900,
+      Math.round(this.capsule.ry * qualityScale * dprFactor * 0.8),
+      164,
+      840,
     );
     const aspect = this.fieldBounds.w / this.fieldBounds.h;
     this.fieldHeight = targetH;
@@ -3331,6 +3332,7 @@ class CapsuleFerrofluid {
     const renderQualityNorm = clamp((this.params.renderQuality - 0.6) / (2.4 - 0.6), 0, 1);
     const lowQuality = 1 - renderQualityNorm;
     const fastShadowMode = this.params.renderQuality < 1.0;
+    const simplifyLighting = this.params.renderQuality < 0.95;
     const sideLightStrength = clamp(this.params.sideLightStrength, 0, 2.5);
     const ledIntensity = Math.max(0, this.params.pointLightIntensity);
     let ledDirX = this.params.pointLightOffsetX;
@@ -3383,24 +3385,26 @@ class CapsuleFerrofluid {
       this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
       this.ctx.restore();
 
-      this.ctx.save();
-      this.ctx.globalCompositeOperation = "screen";
-      this.ctx.globalAlpha = clamp(backplateLight * 0.46, 0, 0.4);
-      this.ctx.filter = `blur(${Math.max(0.6, this.scale * 0.007)}px)`;
-      const ledBloom = this.ctx.createRadialGradient(
-        cx,
-        cy,
-        Math.max(2, Math.min(rx, ry) * 0.12),
-        cx,
-        cy,
-        Math.max(rx, ry) * 0.94,
-      );
-      ledBloom.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, 0.0)`);
-      ledBloom.addColorStop(0.78, `rgba(${lr}, ${lg}, ${lb}, 0.18)`);
-      ledBloom.addColorStop(1, `rgba(${lr}, ${lg}, ${lb}, 0)`);
-      this.ctx.fillStyle = ledBloom;
-      this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
-      this.ctx.restore();
+      if (!simplifyLighting) {
+        this.ctx.save();
+        this.ctx.globalCompositeOperation = "screen";
+        this.ctx.globalAlpha = clamp(backplateLight * 0.46, 0, 0.4);
+        this.ctx.filter = `blur(${Math.max(0.6, this.scale * 0.007)}px)`;
+        const ledBloom = this.ctx.createRadialGradient(
+          cx,
+          cy,
+          Math.max(2, Math.min(rx, ry) * 0.12),
+          cx,
+          cy,
+          Math.max(rx, ry) * 0.94,
+        );
+        ledBloom.addColorStop(0, `rgba(${lr}, ${lg}, ${lb}, 0.0)`);
+        ledBloom.addColorStop(0.78, `rgba(${lr}, ${lg}, ${lb}, 0.18)`);
+        ledBloom.addColorStop(1, `rgba(${lr}, ${lg}, ${lb}, 0)`);
+        this.ctx.fillStyle = ledBloom;
+        this.ctx.fillRect(cx - rx, cy - ry, rx * 2, ry * 2);
+        this.ctx.restore();
+      }
     }
 
     // Capsule-wall LED lighting disabled (temporary) to avoid wall artifacts.
@@ -3487,13 +3491,15 @@ class CapsuleFerrofluid {
     this.ctx.stroke(ringOuterPath);
     this.ctx.restore();
 
-    this.ctx.save();
-    this.ctx.globalCompositeOperation = "screen";
-    this.ctx.strokeStyle = ledRimGradient;
-    this.ctx.lineWidth = ringInnerWidth;
-    const ringInnerPath = this.drawCapsulePath(this.ctx, cx, cy, rx * 0.948, ry * 0.948);
-    this.ctx.stroke(ringInnerPath);
-    this.ctx.restore();
+    if (!simplifyLighting) {
+      this.ctx.save();
+      this.ctx.globalCompositeOperation = "screen";
+      this.ctx.strokeStyle = ledRimGradient;
+      this.ctx.lineWidth = ringInnerWidth;
+      const ringInnerPath = this.drawCapsulePath(this.ctx, cx, cy, rx * 0.948, ry * 0.948);
+      this.ctx.stroke(ringInnerPath);
+      this.ctx.restore();
+    }
 
     const inwardWashAlpha = clamp((ringOuterAlpha + ringInnerAlpha) * 0.9, 0, 0.22);
     this.ctx.save();
